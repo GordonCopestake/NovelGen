@@ -387,7 +387,7 @@ pre.prompt-preview {
   ];
 
   const defaults = () => ({
-    meta: { title: 'Untitled Project', author: '', created: new Date().toISOString(), updated: new Date().toISOString(), version: 1 },
+    meta: { title: 'Untitled Project', author: '', created: new Date().toISOString(), updated: null, version: 1 },
     config: { model: '', temperature: 0.7, top_p: 0.9, seed: undefined, chap_count: 12, chap_words: 2000, banned: [] },
     keys: { openrouter: '', gemini: '' },
     prompts: JSON.parse(JSON.stringify(defaultPrompts)),
@@ -431,6 +431,21 @@ pre.prompt-preview {
   let modelsCache = [];
   let imageModelsCache = [];
   let autosaveTimer = null;
+
+  function refreshStatusBar() {
+    const tokensValue = Number(state.metrics?.tokens);
+    const costValue = Number(state.metrics?.cost);
+    const tokens = Number.isFinite(tokensValue) ? tokensValue : 0;
+    const cost = Number.isFinite(costValue) ? costValue : 0;
+    const updated = state.meta?.updated;
+    dom.status.tokens.textContent = `Tokens used: ${tokens}`;
+    dom.status.cost.textContent = `Cost: $${cost.toFixed(3)}`;
+    dom.status.save.textContent = updated
+      ? 'Last save: ' + new Date(updated).toLocaleTimeString()
+      : 'Last save: never';
+  }
+
+  refreshStatusBar();
 
   const structuredSchemas = {
     worldBible: {
@@ -624,7 +639,7 @@ pre.prompt-preview {
     try {
       state.meta.updated = new Date().toISOString();
       localStorage.setItem('novelgen.project', JSON.stringify(state));
-      dom.status.save.textContent = 'Last save: ' + new Date(state.meta.updated).toLocaleTimeString();
+      refreshStatusBar();
     } catch (err) {
       console.error('Failed to save project', err);
       showToast('Unable to autosave. Check storage permissions.', { persistent: false });
@@ -639,8 +654,7 @@ pre.prompt-preview {
   function updateMetrics(tokens = 0, cost = 0) {
     state.metrics.tokens += tokens;
     state.metrics.cost += cost;
-    dom.status.tokens.textContent = `Tokens used: ${state.metrics.tokens}`;
-    dom.status.cost.textContent = `Cost: $${state.metrics.cost.toFixed(3)}`;
+    refreshStatusBar();
     scheduleAutosave();
   }
 
