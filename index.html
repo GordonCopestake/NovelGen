@@ -438,8 +438,9 @@ textarea.prompt-preview {
     characters: [],
     planCharacters: [],
     plan: [],
+    planMeta: { arc_summary: '', act_breakdown: [], custom_notes: '' },
     drafts: [],
-    cover: { prompt: '', dataUrl: '', attribution: '' },
+    cover: { prompt: '', dataUrl: '', attribution: '', autoSeed: '' },
     continuityNotes: {},
     metrics: { tokens: 0, cost: 0 }
   });
@@ -478,6 +479,15 @@ textarea.prompt-preview {
       }
       return normalized;
     });
+    if (!merged.planMeta || typeof merged.planMeta !== 'object') {
+      merged.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
+    }
+    if (typeof merged.planMeta.arc_summary !== 'string') merged.planMeta.arc_summary = '';
+    if (!Array.isArray(merged.planMeta.act_breakdown)) merged.planMeta.act_breakdown = [];
+    if (typeof merged.planMeta.custom_notes !== 'string') merged.planMeta.custom_notes = '';
+    merged.cover = merged.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
+    if (typeof merged.cover.prompt !== 'string') merged.cover.prompt = '';
+    if (typeof merged.cover.autoSeed !== 'string') merged.cover.autoSeed = '';
     return merged;
   }
 
@@ -1002,9 +1012,143 @@ textarea.prompt-preview {
     return validate(schema, data, 'root');
   }
 
+  function parseList(str) {
+    if (!str) return [];
+    return String(str)
+      .split(/[\n,;]+/)
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+
+  function projectOverview() {
+    const meta = state.meta || {};
+    const config = state.config || {};
+    return {
+      title: meta.title || '',
+      author: meta.author || '',
+      genre: meta.genre || '',
+      themes: parseList(meta.themes),
+      comps: parseList(meta.comps),
+      audience: meta.audience || '',
+      tone: meta.audience || '',
+      rating: meta.rating || '',
+      pov: config.pov || '',
+      idea: state.idea || '',
+      expansion: state.expansion || '',
+      banned: Array.isArray(config.banned) ? config.banned.slice() : []
+    };
+  }
+
+  function composeCoverPrompt() {
+    const overview = projectOverview();
+    const planMeta = state.planMeta || {};
+    const highlightChapters = (state.plan || [])
+      .slice(0, 3)
+      .map(plan => {
+        const title = plan.title || `Chapter ${plan.chapter}`;
+        const summary = plan.synopsis || '';
+        return `${title}${summary ? ': ' + summary : ''}`.trim();
+      })
+      .filter(Boolean)
+      .join(' | ');
+    const promptParts = [
+      `${overview.title || 'Untitled Novel'} cover illustration`
+    ];
+    if (overview.genre) promptParts.push(`${overview.genre} genre`);
+    if (overview.audience) promptParts.push(`for ${overview.audience}`);
+    if (overview.themes && overview.themes.length) promptParts.push(`themes: ${overview.themes.join(', ')}`);
+    if (overview.comps && overview.comps.length) promptParts.push(`inspired by ${overview.comps.join(', ')}`);
+    if (overview.idea) promptParts.push(`Premise: ${overview.idea}`);
+    if (planMeta.arc_summary) promptParts.push(`Story arc: ${planMeta.arc_summary}`);
+    if (planMeta.act_breakdown && planMeta.act_breakdown.length) {
+      promptParts.push(`Act highlights: ${planMeta.act_breakdown.slice(0, 3).join(', ')}`);
+    }
+    if (highlightChapters) promptParts.push(`Key moments: ${highlightChapters}`);
+    if (overview.rating) promptParts.push(`${overview.rating} content rating`);
+    return promptParts.join('. ');
+  }
+
+  function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function replaceNameInText(text, oldName, newName) {
+    if (!text || typeof text !== 'string') return text;
+    const pattern = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, 'g');
+    return text.replace(pattern, newName);
+  }
+
+  function applyCharacterRename(character, oldName, newName) {
+    if (!oldName || !newName || oldName === newName) return;
+    const charId = character?.id;
+    if (Array.isArray(state.planCharacters)) {
+      state.planCharacters = state.planCharacters.map(planChar => {
+        if (!planChar) return planChar;
+        if (planChar.id && planChar.id === charId) {
+          return Object.assign({}, planChar, { name: newName });
+        }
+        if (!planChar.id && planChar.name === oldName) {
+          return Object.assign({}, planChar, { name: newName });
+        }
+        return planChar;
+      });
+    }
+    (state.characters || []).forEach(char => {
+      if (char === character || (char.id && char.id === charId)) {
+        char.name = newName;
+      }
+    });
+    (state.plan || []).forEach(plan => {
+      if (!plan) return;
+      plan.title = replaceNameInText(plan.title, oldName, newName);
+      plan.synopsis = replaceNameInText(plan.synopsis, oldName, newName);
+      if (Array.isArray(plan.beats)) {
+        plan.beats = plan.beats.map(line => replaceNameInText(line, oldName, newName));
+      }
+      if (Array.isArray(plan.key_events)) {
+        plan.key_events = plan.key_events.map(line => replaceNameInText(line, oldName, newName));
+      }
+    });
+    (state.drafts || []).forEach(draft => {
+      if (!draft) return;
+      draft.content_md = replaceNameInText(draft.content_md, oldName, newName);
+      draft.notes = replaceNameInText(draft.notes, oldName, newName);
+      if (typeof draft.prompt_override === 'string' && draft.prompt_override) {
+        draft.prompt_override = replaceNameInText(draft.prompt_override, oldName, newName);
+      }
+    });
+    if (state.planMeta) {
+      state.planMeta.arc_summary = replaceNameInText(state.planMeta.arc_summary, oldName, newName);
+      if (Array.isArray(state.planMeta.act_breakdown)) {
+        state.planMeta.act_breakdown = state.planMeta.act_breakdown.map(item => replaceNameInText(item, oldName, newName));
+      }
+      state.planMeta.custom_notes = replaceNameInText(state.planMeta.custom_notes, oldName, newName);
+    }
+    if (state.cover?.prompt) {
+      state.cover.prompt = replaceNameInText(state.cover.prompt, oldName, newName);
+    }
+    refreshDraftPromptPreviews();
+  }
+
+  function renumberPlanChapters() {
+    const mapping = new Map();
+    (state.plan || []).forEach((plan, index) => {
+      if (!plan) return;
+      const newChapter = index + 1;
+      mapping.set(plan.chapter, newChapter);
+      plan.chapter = newChapter;
+    });
+    (state.drafts || []).forEach(draft => {
+      if (!draft) return;
+      if (mapping.has(draft.chapter)) {
+        draft.chapter = mapping.get(draft.chapter);
+      }
+    });
+  }
+
   function canonSummary() {
+    const overview = projectOverview();
     const bible = state.bible || {};
-    const planSummary = state.plan.map(ch => `${ch.chapter}. ${ch.title}: ${ch.synopsis}`).join('\n');
     const charSummary = state.characters.map(c => ({ id: c.id, name: c.name, alive: c.status?.alive !== false, last_seen_chapter: c.status?.last_seen_chapter || null })).slice(0, 30);
     const hard = [];
     state.characters.forEach(c => {
@@ -1012,10 +1156,21 @@ textarea.prompt-preview {
       if (c.status?.whereabouts) hard.push(`${c.name} is in ${c.status.whereabouts}.`);
     });
     return {
+      project_overview: overview,
       bible_summary: (bible.canon || '').slice(0, 4000),
+      world_bible: {
+        canon: bible.canon || '',
+        timeline: Array.isArray(bible.timeline) ? bible.timeline : [],
+        locations: Array.isArray(bible.locations) ? bible.locations : [],
+        rules: Array.isArray(bible.rules) ? bible.rules : [],
+        tone_style_guide: Array.isArray(bible.tone_style_guide) ? bible.tone_style_guide : []
+      },
       global_tone_style: bible.tone_style_guide || [],
       characters_index: charSummary,
-      plan: state.plan.map(({ chapter, synopsis, key_events, pov, target_words }) => ({ chapter, synopsis, key_events, pov, target_words })).slice(0, 40),
+      story_arc: state.planMeta?.arc_summary || '',
+      act_breakdown: Array.isArray(state.planMeta?.act_breakdown) ? state.planMeta.act_breakdown : [],
+      additional_outline_notes: state.planMeta?.custom_notes || '',
+      plan: state.plan.map(({ chapter, title, synopsis, key_events, beats, pov, target_words }) => ({ chapter, title, synopsis, key_events, beats, pov, target_words })).slice(0, 40),
       hard_constraints: hard
     };
   }
@@ -1029,14 +1184,27 @@ textarea.prompt-preview {
     const canon = canonSummary();
     const plan = state.plan.find(p => p.chapter === chapter) || {};
     const request = {
+      project_overview: canon.project_overview,
       canon_facts: canon,
+      world_bible: canon.world_bible,
+      banned: Array.isArray(state.config?.banned) ? state.config.banned : [],
       draft_request: {
         chapter,
+        title: plan.title || '',
+        synopsis: plan.synopsis || '',
         target_words: plan.target_words || state.config.chap_words,
         pov: plan.pov || state.config.pov || 'unspecified',
-        specifics: plan.key_events || []
+        specifics: plan.key_events || [],
+        beats: plan.beats || [],
+        arc_context: {
+          summary: state.planMeta?.arc_summary || '',
+          act_breakdown: Array.isArray(state.planMeta?.act_breakdown) ? state.planMeta.act_breakdown : []
+        }
       }
     };
+    if (state.planMeta?.custom_notes) {
+      request.draft_request.additional_outline_notes = state.planMeta.custom_notes;
+    }
     return JSON.stringify(request, null, 2);
   }
 
@@ -1220,7 +1388,7 @@ textarea.prompt-preview {
         state = hydrateState(json);
         if (zip.file(/cover\.(png|jpg|jpeg)$/i)[0]) {
           const coverData = await zip.file(/cover\.(png|jpg|jpeg)$/i)[0].async('base64');
-          state.cover = state.cover || {};
+          state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
           state.cover.dataUrl = 'data:image/png;base64,' + coverData;
         }
         saveState();
@@ -1400,8 +1568,17 @@ textarea.prompt-preview {
     character.status = character.status || {};
     character.continuity_flags = character.continuity_flags || {};
     const markDirty = () => { scheduleAutosave(); refreshDraftPromptPreviews(); };
+    let previousName = character.name;
     const nameInput = createInput('text', character.name);
-    nameInput.oninput = () => { character.name = nameInput.value; markDirty(); };
+    nameInput.oninput = () => {
+      const newName = nameInput.value;
+      if (previousName && previousName !== newName) {
+        applyCharacterRename(character, previousName, newName);
+        previousName = newName;
+      }
+      character.name = newName;
+      markDirty();
+    };
     const roleInput = createInput('text', character.role);
     roleInput.oninput = () => { character.role = roleInput.value; markDirty(); };
     const bioArea = createTextarea(character.bio);
@@ -1584,7 +1761,7 @@ textarea.prompt-preview {
       introText: 'Expanding idea...',
       promptBuilder: () => [
         { role: 'system', content: state.prompts?.idea?.system || defaultPrompts.idea.system },
-        { role: 'user', content: JSON.stringify({ idea: state.idea, genre: state.meta.genre, themes: state.meta.themes }) }
+        { role: 'user', content: JSON.stringify({ idea: state.idea, setup: projectOverview() }) }
       ],
       onToken(full) {
         state.expansion = full;
@@ -1601,7 +1778,7 @@ textarea.prompt-preview {
       structured: { schema: structuredSchemas.worldBible, name: 'World bible JSON', onComplete(result) { state.bible = result.bible; scheduleAutosave(); render(); } },
       promptBuilder: () => [
         { role: 'system', content: state.prompts?.bible?.system || defaultPrompts.bible.system },
-        { role: 'user', content: JSON.stringify({ idea: state.idea, expansion: state.expansion, banned: state.config.banned }) }
+        { role: 'user', content: JSON.stringify({ idea: state.idea, expansion: state.expansion, setup: projectOverview(), banned: state.config.banned }) }
       ],
       onToken(full) {}
     });
@@ -1611,7 +1788,15 @@ textarea.prompt-preview {
     await generateWithStreaming({
       introText: 'Generating story plan...',
       structured: { schema: structuredSchemas.plan, onComplete(result) {
-        state.plan = result.plan || [];
+        state.plan = (result.plan || []).map((entry, index) => {
+          const normalized = Object.assign({
+            beats: Array.isArray(entry?.beats) ? entry.beats : [],
+            key_events: Array.isArray(entry?.key_events) ? entry.key_events : []
+          }, entry);
+          const chapterNumber = Number(normalized.chapter);
+          normalized.chapter = Number.isFinite(chapterNumber) ? chapterNumber : index + 1;
+          return normalized;
+        });
         state.planCharacters = JSON.parse(JSON.stringify(result.characters || []));
         activeDraftTab = state.plan.length ? state.plan[0].chapter : null;
         state.characters = state.characters || [];
@@ -1620,12 +1805,32 @@ textarea.prompt-preview {
             if (!state.characters.find(c => c.id === char.id)) state.characters.push(char);
           });
         }
+        if (!state.planMeta || typeof state.planMeta !== 'object') {
+          state.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
+        }
+        if (typeof result.story_arc === 'string') {
+          state.planMeta.arc_summary = result.story_arc;
+        } else if (typeof result.arc_summary === 'string') {
+          state.planMeta.arc_summary = result.arc_summary;
+        }
+        if (Array.isArray(result.act_breakdown)) {
+          state.planMeta.act_breakdown = result.act_breakdown;
+        } else if (Array.isArray(result.story_beats)) {
+          state.planMeta.act_breakdown = result.story_beats;
+        }
+        if (typeof result.plan_notes === 'string') {
+          state.planMeta.custom_notes = result.plan_notes;
+        } else if (typeof result.notes === 'string') {
+          state.planMeta.custom_notes = result.notes;
+        }
+        renumberPlanChapters();
         scheduleAutosave();
+        refreshDraftPromptPreviews();
         render();
       }, name: 'Story plan JSON' },
       promptBuilder: () => [
         { role: 'system', content: state.prompts?.plan?.system || defaultPrompts.plan.system },
-        { role: 'user', content: JSON.stringify({ bible: state.bible, idea: state.idea, expansion: state.expansion, chapter_count: state.config.chap_count, target_words: state.config.chap_words }) }
+        { role: 'user', content: JSON.stringify({ bible: state.bible, idea: state.idea, expansion: state.expansion, setup: projectOverview(), chapter_count: state.config.chap_count, target_words: state.config.chap_words }) }
       ],
       onToken(){}
     });
@@ -1636,7 +1841,7 @@ textarea.prompt-preview {
       introText: 'Generating character sheets...',
       promptBuilder: () => [
         { role: 'system', content: state.prompts?.characters?.system || defaultPrompts.characters.system },
-        { role: 'user', content: JSON.stringify({ bible: state.bible, plan: state.plan }) }
+        { role: 'user', content: JSON.stringify({ bible: state.bible, plan: state.plan, setup: projectOverview(), expansion: state.expansion }) }
       ],
       onToken(full) {
         state.charactersNotes = full;
@@ -1659,6 +1864,7 @@ textarea.prompt-preview {
   }
 
   async function generateCover(model) {
+    const resolvedPrompt = (state.cover?.prompt && state.cover.prompt.trim()) || composeCoverPrompt();
     if (model === 'openrouter') {
       if (!state.config.image_model) {
         showToast('Select an image-capable model.');
@@ -1673,7 +1879,7 @@ textarea.prompt-preview {
           },
           body: JSON.stringify({
             model: state.config.image_model,
-            prompt: state.cover?.prompt || `${state.meta.title} cover art, ${state.meta.genre} novel`,
+            prompt: resolvedPrompt || `${state.meta.title} cover art, ${state.meta.genre} novel`,
             size: '1024x1536'
           })
         });
@@ -1681,7 +1887,7 @@ textarea.prompt-preview {
         const data = await res.json();
         const image = data.data?.[0]?.b64_json;
         if (!image) throw new Error('No image returned');
-        state.cover = state.cover || {};
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = 'data:image/png;base64,' + image;
         scheduleAutosave();
         render();
@@ -1698,13 +1904,13 @@ textarea.prompt-preview {
         const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateImage?key=' + state.keys.gemini, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: state.cover?.prompt || `${state.meta.title} book cover`, size: '1024x1536' })
+          body: JSON.stringify({ prompt: resolvedPrompt || `${state.meta.title} book cover`, size: '1024x1536' })
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         const image = data?.generatedImages?.[0]?.bytesBase64;
         if (!image) throw new Error('No image returned');
-        state.cover = state.cover || {};
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = 'data:image/png;base64,' + image;
         scheduleAutosave();
         render();
@@ -1718,9 +1924,38 @@ textarea.prompt-preview {
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = '<h2>Cover Generator</h2>';
-    const prompt = createTextarea(state.cover?.prompt || '', { placeholder: 'Cover prompt' });
-    prompt.addEventListener('input', () => { state.cover = state.cover || {}; state.cover.prompt = prompt.value; scheduleAutosave(); });
+    state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
+    const autoPrompt = composeCoverPrompt();
+    const currentPrompt = (state.cover.prompt || '').trim();
+    const autoSeed = state.cover.autoSeed || '';
+    const shouldApplyAuto = autoPrompt && (!currentPrompt || currentPrompt === autoSeed);
+    if (shouldApplyAuto) {
+      const changed = state.cover.prompt !== autoPrompt;
+      state.cover.prompt = autoPrompt;
+      state.cover.autoSeed = autoPrompt;
+      if (changed) scheduleAutosave();
+    }
+    const promptValue = state.cover.prompt || autoPrompt || '';
+    const prompt = createTextarea(promptValue, { placeholder: 'Cover prompt' });
+    prompt.addEventListener('input', () => {
+      state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
+      state.cover.prompt = prompt.value;
+      state.cover.autoSeed = '';
+      scheduleAutosave();
+    });
     panel.appendChild(prompt);
+    const resetPromptBtn = document.createElement('button');
+    resetPromptBtn.className = 'secondary';
+    resetPromptBtn.textContent = 'Use outline-based prompt';
+    resetPromptBtn.onclick = () => {
+      const refreshed = composeCoverPrompt();
+      state.cover.prompt = refreshed;
+      state.cover.autoSeed = refreshed;
+      prompt.value = refreshed;
+      scheduleAutosave();
+      showToast('Cover prompt refreshed from project setup and outline.');
+    };
+    panel.appendChild(resetPromptBtn);
     const select = document.createElement('select');
     select.innerHTML = '<option value="openrouter">OpenRouter Image Model</option><option value="gemini">Google Gemini</option>';
     panel.appendChild(labelWrap('Cover model route', select));
@@ -1746,7 +1981,7 @@ textarea.prompt-preview {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        state.cover = state.cover || {};
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = reader.result;
         scheduleAutosave();
         render();
@@ -1811,6 +2046,30 @@ textarea.prompt-preview {
   const stepRenderers = [
     function setupStep(container) {
       const panel = createSection('Project Setup');
+      const flowGuide = document.createElement('details');
+      flowGuide.className = 'small';
+      flowGuide.open = true;
+      const flowSummary = document.createElement('summary');
+      flowSummary.textContent = 'How the NovelGen workflow fits together';
+      flowGuide.appendChild(flowSummary);
+      const flowList = document.createElement('ol');
+      flowList.className = 'small';
+      const flowItems = [
+        '1. Setup: Fill in genre, themes, audience, POV, and guardrails. These values seed every later prompt.',
+        '2. Idea → Expansion: Brainstorm the premise; the expansion text feeds the world bible, outline, and drafting prompts.',
+        '3. World Bible: Builds canon, tone, and rules using your setup, idea, and banned list.',
+        '4. Story Arc & Chapter Plan: Generates the outline, then lets you edit titles, beats, and act notes. Draft prompts stay synced to your changes.',
+        '5. Characters: Restores sheets from the plan or generates fresh ones. Renaming updates outlines and drafts.',
+        '6. Draft Chapters & Continuity: Chapter prompts merge the plan, arc summary, bible, and project overview for continuity.',
+        '7. Cover Generator & Export: The cover prompt automatically composes from setup and arc data, while export assembles your files.'
+      ];
+      flowItems.forEach(text => {
+        const item = document.createElement('li');
+        item.textContent = text;
+        flowList.appendChild(item);
+      });
+      flowGuide.appendChild(flowList);
+      panel.appendChild(flowGuide);
       const titleInput = createInput('text', state.meta.title, { placeholder: 'Novel title' });
       titleInput.addEventListener('input', () => { state.meta.title = titleInput.value; scheduleAutosave(); render(); });
       panel.appendChild(labelWrap('Title', titleInput));
@@ -1943,6 +2202,7 @@ textarea.prompt-preview {
     },
     function planStep(container) {
       const panel = createSection('Story Arc & Chapter Plan');
+      state.planMeta = state.planMeta || { arc_summary: '', act_breakdown: [], custom_notes: '' };
       const promptDescription = document.createElement('p');
       promptDescription.className = 'small';
       promptDescription.textContent = 'Adjust the agent prompt before generating a new outline. Changes are saved with your project.';
@@ -1960,19 +2220,175 @@ textarea.prompt-preview {
         scheduleAutosave();
       });
       panel.appendChild(labelWrap('Story Arc & Chapter Plan agent prompt', promptArea));
-      const planList = document.createElement('div');
-      planList.className = 'grid two';
-      (state.plan || []).forEach(plan => {
-        const card = document.createElement('div');
-        card.className = 'chapter-card';
-        card.innerHTML = `<strong>Chapter ${plan.chapter}: ${plan.title}</strong><p class="small">${plan.synopsis}</p><p class="small">Beats: ${(plan.beats || []).join(', ')}</p>`;
-        planList.appendChild(card);
-      });
-      panel.appendChild(planList);
+      const planButtons = document.createElement('div');
+      planButtons.className = 'card-actions';
       const genBtn = document.createElement('button');
       genBtn.textContent = 'Generate Outline';
       genBtn.onclick = generatePlan;
-      panel.appendChild(genBtn);
+      const addBtn = document.createElement('button');
+      addBtn.className = 'secondary';
+      addBtn.textContent = 'Add Chapter';
+      addBtn.onclick = () => {
+        const nextChapter = (state.plan || []).length + 1;
+        state.plan = state.plan || [];
+        state.plan.push({
+          chapter: nextChapter,
+          title: `Chapter ${nextChapter}`,
+          synopsis: '',
+          beats: [],
+          key_events: [],
+          pov: state.config.pov || '',
+          target_words: state.config.chap_words || 2000
+        });
+        renumberPlanChapters();
+        scheduleAutosave();
+        refreshDraftPromptPreviews();
+        render();
+      };
+      planButtons.append(genBtn, addBtn);
+      panel.appendChild(planButtons);
+      const arcPanel = document.createElement('div');
+      arcPanel.className = 'arc-editor';
+      const arcArea = createTextarea(state.planMeta?.arc_summary || '', { placeholder: 'High-level arc summary', spellcheck: true });
+      arcArea.style.minHeight = '110px';
+      arcArea.addEventListener('input', () => {
+        state.planMeta = state.planMeta || { arc_summary: '', act_breakdown: [], custom_notes: '' };
+        state.planMeta.arc_summary = arcArea.value;
+        scheduleAutosave();
+        refreshDraftPromptPreviews();
+      });
+      arcPanel.appendChild(labelWrap('Arc summary', arcArea));
+      const actArea = createTextarea((state.planMeta?.act_breakdown || []).join('\n'), { placeholder: 'Act / beat breakdown (one per line)' });
+      actArea.style.minHeight = '110px';
+      actArea.addEventListener('input', () => {
+        state.planMeta = state.planMeta || { arc_summary: '', act_breakdown: [], custom_notes: '' };
+        state.planMeta.act_breakdown = actArea.value.split('\n').map(x => x.trim()).filter(Boolean);
+        scheduleAutosave();
+        refreshDraftPromptPreviews();
+      });
+      arcPanel.appendChild(labelWrap('Act & beat breakdown', actArea));
+      const notesArea = createTextarea(state.planMeta?.custom_notes || '', { placeholder: 'Additional outline notes' });
+      notesArea.style.minHeight = '100px';
+      notesArea.addEventListener('input', () => {
+        state.planMeta = state.planMeta || { arc_summary: '', act_breakdown: [], custom_notes: '' };
+        state.planMeta.custom_notes = notesArea.value;
+        scheduleAutosave();
+        refreshDraftPromptPreviews();
+      });
+      arcPanel.appendChild(labelWrap('Additional outline notes', notesArea));
+      panel.appendChild(arcPanel);
+      const editHint = document.createElement('p');
+      editHint.className = 'small';
+      editHint.textContent = 'Edit chapters directly below. Changes update drafting prompts immediately.';
+      panel.appendChild(editHint);
+      const planList = document.createElement('div');
+      planList.className = 'plan-editor';
+      if (!state.plan || !state.plan.length) {
+        const empty = document.createElement('p');
+        empty.className = 'small';
+        empty.textContent = 'No chapters yet. Generate an outline or add chapters manually.';
+        planList.appendChild(empty);
+      } else {
+        state.plan.sort((a, b) => a.chapter - b.chapter);
+        state.plan.forEach((plan, index) => {
+          const card = document.createElement('div');
+          card.className = 'chapter-card';
+          const heading = document.createElement('h3');
+          heading.textContent = `Chapter ${plan.chapter}`;
+          card.appendChild(heading);
+          const titleInput = createInput('text', plan.title || '', { placeholder: 'Chapter title' });
+          titleInput.addEventListener('input', () => {
+            plan.title = titleInput.value;
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('Title', titleInput));
+          const synopsisArea = createTextarea(plan.synopsis || '', { placeholder: 'Synopsis' });
+          synopsisArea.style.minHeight = '120px';
+          synopsisArea.addEventListener('input', () => {
+            plan.synopsis = synopsisArea.value;
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('Synopsis', synopsisArea));
+          const beatsArea = createTextarea((plan.beats || []).join('\n'), { placeholder: 'Beats (one per line)' });
+          beatsArea.style.minHeight = '110px';
+          beatsArea.addEventListener('input', () => {
+            plan.beats = beatsArea.value.split('\n').map(x => x.trim()).filter(Boolean);
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('Beats', beatsArea));
+          const keyEventsArea = createTextarea((plan.key_events || []).join('\n'), { placeholder: 'Key events (one per line)' });
+          keyEventsArea.style.minHeight = '110px';
+          keyEventsArea.addEventListener('input', () => {
+            plan.key_events = keyEventsArea.value.split('\n').map(x => x.trim()).filter(Boolean);
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('Key events', keyEventsArea));
+          const povInput = createInput('text', plan.pov || state.config.pov || '', { placeholder: 'POV' });
+          povInput.addEventListener('input', () => {
+            plan.pov = povInput.value;
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('POV', povInput));
+          const targetWordsInput = createInput('number', plan.target_words || state.config.chap_words || '', { min: '0' });
+          targetWordsInput.addEventListener('input', () => {
+            const parsed = parseInt(targetWordsInput.value || '0', 10);
+            plan.target_words = Number.isNaN(parsed) ? undefined : parsed;
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+          });
+          card.appendChild(labelWrap('Target words', targetWordsInput));
+          const actions = document.createElement('div');
+          actions.className = 'card-actions';
+          const upBtn = document.createElement('button');
+          upBtn.className = 'secondary';
+          upBtn.textContent = 'Move Up';
+          upBtn.disabled = index === 0;
+          upBtn.onclick = () => {
+            if (index === 0) return;
+            const swap = state.plan[index - 1];
+            state.plan[index - 1] = state.plan[index];
+            state.plan[index] = swap;
+            renumberPlanChapters();
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+            render();
+          };
+          const downBtn = document.createElement('button');
+          downBtn.className = 'secondary';
+          downBtn.textContent = 'Move Down';
+          downBtn.disabled = index === state.plan.length - 1;
+          downBtn.onclick = () => {
+            if (index === state.plan.length - 1) return;
+            const swap = state.plan[index + 1];
+            state.plan[index + 1] = state.plan[index];
+            state.plan[index] = swap;
+            renumberPlanChapters();
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+            render();
+          };
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'danger';
+          deleteBtn.textContent = 'Delete Chapter';
+          deleteBtn.onclick = () => {
+            if (!confirm(`Delete Chapter ${plan.chapter}? This cannot be undone.`)) return;
+            state.plan.splice(index, 1);
+            renumberPlanChapters();
+            scheduleAutosave();
+            refreshDraftPromptPreviews();
+            render();
+          };
+          actions.append(upBtn, downBtn, deleteBtn);
+          card.appendChild(actions);
+          planList.appendChild(card);
+        });
+      }
+      panel.appendChild(planList);
     },
     function charactersStep(container) {
       const panel = createSection('Characters');
