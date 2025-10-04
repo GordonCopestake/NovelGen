@@ -1,0 +1,1535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NovelGen</title>
+<!-- README: NovelGen is a client-only novel planning and drafting assistant. Enter your OpenRouter (and optional Google Gemini) API keys in the Setup step. Keys are stored locally; export/import project JSON via the Export/Import step. Follow the sidebar wizard from Setup through EPUB Builder to generate your book. -->
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f5f5;
+  --bg-dark: #1d1f21;
+  --fg: #222;
+  --fg-dark: #f1f1f1;
+  --accent: #7c5cff;
+  --accent-dark: #c0a6ff;
+  --card: rgba(255,255,255,0.85);
+  --card-dark: rgba(45,49,55,0.85);
+  font-family: "Inter", system-ui, sans-serif;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  background: linear-gradient(160deg, var(--bg), #dfe4ff);
+  color: var(--fg);
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background: linear-gradient(160deg, var(--bg-dark), #252c3f);
+    color: var(--fg-dark);
+  }
+}
+.sidebar {
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(0,0,0,0.05);
+  padding: 1.5rem 1rem 5rem;
+  overflow-y: auto;
+  position: relative;
+}
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    background: rgba(28,32,39,0.75);
+    border-right-color: rgba(255,255,255,0.08);
+  }
+}
+.main {
+  padding: 1.5rem;
+  overflow-y: auto;
+  position: relative;
+}
+.step-item {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.step-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+.step-item.completed {
+  background: rgba(124,92,255,0.15);
+}
+.step-index {
+  font-weight: 600;
+  width: 1.75rem;
+}
+.step-title {
+  flex: 1;
+  font-size: 0.95rem;
+}
+.panel {
+  background: rgba(255,255,255,0.88);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 12px 30px rgba(15,20,30,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  .panel {
+    background: rgba(30,34,44,0.9);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+  }
+}
+.panel h2 {
+  margin-top: 0;
+}
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+input[type="text"], input[type="number"], textarea, select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.1);
+  background: rgba(255,255,255,0.9);
+  font-size: 0.95rem;
+  color: inherit;
+  box-sizing: border-box;
+  margin-bottom: 0.9rem;
+}
+textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.6rem 1.4rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-right: 0.65rem;
+  margin-top: 0.35rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 8px 16px rgba(124,92,255,0.3);
+}
+button.secondary {
+  background: rgba(124,92,255,0.12);
+  color: inherit;
+  box-shadow: none;
+}
+button.danger {
+  background: #ff5f6d;
+  box-shadow: 0 8px 16px rgba(255,95,109,0.3);
+}
+button:hover {
+  transform: translateY(-1px);
+}
+fieldset {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.2rem;
+}
+fieldset legend {
+  font-weight: 700;
+}
+.flex {
+  display: flex;
+  gap: 1rem;
+}
+.flex-2 {
+  flex: 2;
+}
+.flex-1 {
+  flex: 1;
+}
+.small {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+textarea.small {
+  min-height: 70px;
+}
+.status-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.86);
+  backdrop-filter: blur(10px);
+  font-size: 0.85rem;
+}
+@media (prefers-color-scheme: dark) {
+  .status-bar {
+    background: rgba(22,26,33,0.9);
+    border-top-color: rgba(255,255,255,0.08);
+  }
+}
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: rgba(15,15,20,0.92);
+  color: #fff;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
+  box-shadow: 0 16px 30px rgba(0,0,0,0.35);
+  max-width: 320px;
+  z-index: 999;
+}
+.toast button {
+  background: rgba(255,255,255,0.1);
+  margin: 0;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.08);
+  font-size: 0.75rem;
+  margin-right: 0.3rem;
+}
+.grid {
+  display: grid;
+  gap: 1rem;
+}
+.grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.chapter-card {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+#cover-canvas {
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 320px;
+}
+#step-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 1rem 0;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.95));
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+@media (prefers-color-scheme: dark) {
+  #step-actions {
+    background: linear-gradient(180deg, transparent, rgba(18,20,26,0.95));
+  }
+}
+pre.prompt-preview {
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(0,0,0,0.08);
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+<nav class="sidebar">
+  <h1>NovelGen</h1>
+  <p class="small">Browser-native novel ideation, planning, drafting, and EPUB export.</p>
+  <div id="step-list"></div>
+  <div class="status-bar" id="status-bar">
+    <span id="status-progress">Step 1/9</span>
+    <span id="status-tokens">Tokens used: 0</span>
+    <span id="status-cost">Cost: $0.000</span>
+    <span id="status-save">Last save: never</span>
+  </div>
+</nav>
+<main class="main">
+  <div id="content"></div>
+</main>
+<div id="toast" class="toast" style="display:none;"></div>
+<script>
+(() => {
+  const dom = {
+    stepList: document.getElementById('step-list'),
+    content: document.getElementById('content'),
+    status: {
+      progress: document.getElementById('status-progress'),
+      tokens: document.getElementById('status-tokens'),
+      cost: document.getElementById('status-cost'),
+      save: document.getElementById('status-save'),
+    },
+    toast: document.getElementById('toast'),
+  };
+
+  const steps = [
+    'Setup',
+    'Idea → Expansion',
+    'World Bible',
+    'Story Arc & Chapter Plan',
+    'Characters',
+    'Draft Chapters',
+    'Continuity Checks',
+    'EPUB Builder',
+    'Cover Generator & Export'
+  ];
+
+  const defaults = () => ({
+    meta: { title: 'Untitled Project', author: '', created: new Date().toISOString(), updated: new Date().toISOString(), version: 1 },
+    config: { model: '', temperature: 0.7, top_p: 0.9, seed: undefined, chap_count: 12, chap_words: 2000, banned: [] },
+    keys: { openrouter: '', gemini: '' },
+    idea: '',
+    expansion: '',
+    bible: { canon: '', timeline: [], locations: [], rules: [], tone_style_guide: [] },
+    characters: [],
+    plan: [],
+    drafts: [],
+    cover: { prompt: '', dataUrl: '', attribution: '' },
+    continuityNotes: {},
+    metrics: { tokens: 0, cost: 0 }
+  });
+
+  let state = loadState();
+  let activeStep = 0;
+  let modelsCache = [];
+  let imageModelsCache = [];
+  let autosaveTimer = null;
+
+  const structuredSchemas = {
+    worldBible: {
+      type: 'object',
+      required: ['bible'],
+      properties: {
+        bible: {
+          type: 'object',
+          required: ['canon','timeline','locations','rules','tone_style_guide'],
+          properties: {
+            canon: { type: 'string' },
+            timeline: { type: 'array', items: { type: 'string' } },
+            locations: { type: 'array', items: { type: 'string' } },
+            rules: { type: 'array', items: { type: 'string' } },
+            tone_style_guide: { type: 'array', items: { type: 'string' } }
+          }
+        }
+      }
+    },
+    plan: {
+      type: 'object',
+      required: ['plan'],
+      properties: {
+        plan: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['chapter','title','synopsis','beats','key_events'],
+            properties: {
+              chapter: { type: 'number' },
+              title: { type: 'string' },
+              synopsis: { type: 'string' },
+              beats: { type: 'array', items: { type: 'string' } },
+              key_events: { type: 'array', items: { type: 'string' } },
+              pov: { type: 'string' },
+              target_words: { type: 'number' }
+            }
+          }
+        },
+        characters: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id','name','role','bio','traits','arcs','status','continuity_flags'],
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              role: { type: 'string' },
+              bio: { type: 'string' },
+              traits: { type: 'array', items: { type: 'string' } },
+              arcs: { type: 'array', items: { type: 'string' } },
+              status: { type: 'object' },
+              continuity_flags: { type: 'object' }
+            }
+          }
+        }
+      }
+    },
+    continuity: {
+      type: 'object',
+      required: ['violations'],
+      properties: {
+        violations: { type: 'array', items: { type: 'string' } }
+      }
+    },
+    continuityDelta: {
+      type: 'object',
+      properties: {
+        delta_state: { type: 'array', items: { type: 'object' } }
+      }
+    }
+  };
+
+  function uuidv4() {
+    return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+  }
+
+  function showToast(message, options = {}) {
+    dom.toast.textContent = '';
+    dom.toast.style.display = 'block';
+    dom.toast.innerHTML = `<div>${message}</div>`;
+    if (options.actionText && options.onAction) {
+      const btn = document.createElement('button');
+      btn.textContent = options.actionText;
+      btn.onclick = () => { options.onAction(); hideToast(); };
+      dom.toast.appendChild(btn);
+    }
+    if (!options.persistent) {
+      setTimeout(() => hideToast(), options.duration || 5000);
+    }
+  }
+  function hideToast() {
+    dom.toast.style.display = 'none';
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem('novelgen.project');
+      if (!raw) return defaults();
+      const parsed = JSON.parse(raw);
+      return Object.assign(defaults(), parsed);
+    } catch (err) {
+      console.error('Failed to load project', err);
+      return defaults();
+    }
+  }
+
+  function saveState() {
+    try {
+      state.meta.updated = new Date().toISOString();
+      localStorage.setItem('novelgen.project', JSON.stringify(state));
+      dom.status.save.textContent = 'Last save: ' + new Date(state.meta.updated).toLocaleTimeString();
+    } catch (err) {
+      console.error('Failed to save project', err);
+      showToast('Unable to autosave. Check storage permissions.', { persistent: false });
+    }
+  }
+
+  function scheduleAutosave() {
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => saveState(), 800);
+  }
+
+  function updateMetrics(tokens = 0, cost = 0) {
+    state.metrics.tokens += tokens;
+    state.metrics.cost += cost;
+    dom.status.tokens.textContent = `Tokens used: ${state.metrics.tokens}`;
+    dom.status.cost.textContent = `Cost: $${state.metrics.cost.toFixed(3)}`;
+    scheduleAutosave();
+  }
+
+  function renderSidebar() {
+    dom.stepList.innerHTML = '';
+    steps.forEach((title, idx) => {
+      const item = document.createElement('div');
+      item.className = 'step-item' + (idx === activeStep ? ' active' : '') + (idx < activeStep ? ' completed' : '');
+      item.innerHTML = `<span class="step-index">${idx + 1}</span><span class="step-title">${title}</span>`;
+      item.addEventListener('click', () => {
+        activeStep = idx;
+        render();
+      });
+      dom.stepList.appendChild(item);
+    });
+    dom.status.progress.textContent = `Step ${activeStep + 1}/${steps.length}`;
+  }
+
+  function render() {
+    renderSidebar();
+    dom.content.innerHTML = '';
+    const stepRenderer = stepRenderers[activeStep];
+    if (stepRenderer) stepRenderer(dom.content);
+  }
+
+  function createTextarea(value, opts = {}) {
+    const ta = document.createElement('textarea');
+    ta.value = value || '';
+    Object.assign(ta, opts);
+    return ta;
+  }
+
+  function createInput(type, value, opts = {}) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value ?? '';
+    Object.assign(input, opts);
+    return input;
+  }
+
+  function createSection(title, children = []) {
+    const panel = document.createElement('section');
+    panel.className = 'panel';
+    panel.innerHTML = `<h2>${title}</h2>`;
+    children.forEach(child => panel.appendChild(child));
+    dom.content.appendChild(panel);
+    return panel;
+  }
+
+  function renderKeyPanel() {
+    const container = document.createElement('div');
+    const openKey = createInput('text', state.keys.openrouter, { placeholder: 'OpenRouter API key (sk-...)' });
+    openKey.addEventListener('input', () => { state.keys.openrouter = openKey.value.trim(); });
+    const gemKey = createInput('text', state.keys.gemini, { placeholder: 'Google Gemini API key (optional)' });
+    gemKey.addEventListener('input', () => { state.keys.gemini = gemKey.value.trim(); });
+    container.appendChild(labelWrap('OpenRouter API key', openKey));
+    container.appendChild(labelWrap('Google Gemini API key', gemKey));
+    const btnRow = document.createElement('div');
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save Keys Locally';
+    saveBtn.onclick = () => { saveState(); showToast('API keys saved locally. They are never uploaded.'); };
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'secondary';
+    downloadBtn.textContent = 'Download Settings.json';
+    downloadBtn.onclick = () => downloadSettings();
+    const uploadBtn = document.createElement('button');
+    uploadBtn.className = 'secondary';
+    uploadBtn.textContent = 'Load Settings.json';
+    uploadBtn.onclick = () => loadSettingsFile();
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'danger';
+    clearBtn.textContent = 'Clear Keys';
+    clearBtn.onclick = () => { state.keys = { openrouter: '', gemini: '' }; saveState(); render(); };
+    btnRow.append(saveBtn, downloadBtn, uploadBtn, clearBtn);
+    container.appendChild(btnRow);
+    return container;
+  }
+
+  function labelWrap(text, element) {
+    const wrapper = document.createElement('div');
+    const label = document.createElement('label');
+    label.textContent = text;
+    wrapper.appendChild(label);
+    wrapper.appendChild(element);
+    return wrapper;
+  }
+
+  function populateModelsDropdown(select) {
+    select.innerHTML = '<option value="">Select model</option>';
+    modelsCache.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.name || model.id} (${model.context_length || '?'} ctx)`;
+      option.title = model.pricing ? `Input $${model.pricing.prompt} / Output $${model.pricing.completion}` : '';
+      select.appendChild(option);
+    });
+  }
+
+  async function fetchModels() {
+    if (!state.keys.openrouter) return;
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${state.keys.openrouter}`
+        }
+      });
+      if (!res.ok) throw new Error('Failed to load models');
+      const data = await res.json();
+      const curatedIds = new Set([
+        'anthropic/claude-3.5-sonnet',
+        'openai/gpt-4o-mini',
+        'mistralai/mixtral-8x7b-instruct',
+        'meta-llama/llama-3.1-70b-instruct',
+        'google/gemini-flash-1.5',
+        'perplexity/llama-3-sonar-large-32k-chat'
+      ]);
+      modelsCache = data.data
+        .filter(m => !m.archived && (curatedIds.has(m.id) || (m.context_length || 0) > 12000))
+        .sort((a,b) => (b.context_length || 0) - (a.context_length || 0));
+      imageModelsCache = data.data.filter(m => m.capabilities?.image);
+      render();
+    } catch (err) {
+      showToast('Unable to fetch model list. Enter key and retry.', { persistent: false });
+      console.error(err);
+    }
+  }
+
+  async function checkCredits() {
+    if (!state.keys.openrouter) {
+      showToast('Add an OpenRouter key first.');
+      return;
+    }
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/key', {
+        headers: { 'Authorization': `Bearer ${state.keys.openrouter}` }
+      });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      showToast(`Remaining credits: ${JSON.stringify(data)}`);
+    } catch (err) {
+      console.error(err);
+      showToast('Could not retrieve credit info.');
+    }
+  }
+
+  async function* orChat(opts) {
+    const { model, messages, temperature, top_p, seed, stream = true, structuredSchema } = opts;
+    if (!state.keys.openrouter) throw new Error('OpenRouter key missing');
+    const headers = {
+      'Authorization': `Bearer ${state.keys.openrouter}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': location.origin,
+      'X-Title': 'NovelGen'
+    };
+    const body = {
+      model,
+      messages,
+      temperature,
+      top_p,
+      seed,
+      stream
+    };
+    if (structuredSchema) {
+      body.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: 'Structured',
+          strict: true,
+          schema: structuredSchema
+        }
+      };
+    }
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`OpenRouter error ${res.status}: ${text}`);
+    }
+    if (!stream) {
+      const json = await res.json();
+      yield json.choices?.[0]?.message?.content || '';
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i].trim();
+        if (!part.startsWith('data:')) continue;
+        const payload = part.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const json = JSON.parse(payload);
+          const token = json.choices?.[0]?.delta?.content || '';
+          if (token) yield token;
+        } catch (err) {
+          console.warn('Stream parse error', err, part);
+        }
+      }
+      buffer = parts[parts.length - 1];
+    }
+  }
+  function validateJson(schema, data) {
+    function validate(schema, data, path = '') {
+      if (schema.type === 'object') {
+        if (typeof data !== 'object' || data === null || Array.isArray(data)) return `${path} should be object`;
+        if (schema.required) {
+          for (const key of schema.required) {
+            if (!(key in data)) return `${path}.${key} missing`;
+          }
+        }
+        if (schema.properties) {
+          for (const key in schema.properties) {
+            if (key in data) {
+              const err = validate(schema.properties[key], data[key], `${path}.${key}`);
+              if (err) return err;
+            }
+          }
+        }
+      } else if (schema.type === 'array') {
+        if (!Array.isArray(data)) return `${path} should be array`;
+        if (schema.items) {
+          for (let i = 0; i < data.length; i++) {
+            const err = validate(schema.items, data[i], `${path}[${i}]`);
+            if (err) return err;
+          }
+        }
+      } else if (schema.type === 'string') {
+        if (typeof data !== 'string') return `${path} should be string`;
+      } else if (schema.type === 'number') {
+        if (typeof data !== 'number') return `${path} should be number`;
+      }
+      return null;
+    }
+    return validate(schema, data, 'root');
+  }
+
+  function canonSummary() {
+    const bible = state.bible || {};
+    const planSummary = state.plan.map(ch => `${ch.chapter}. ${ch.title}: ${ch.synopsis}`).join('\n');
+    const charSummary = state.characters.map(c => ({ id: c.id, name: c.name, alive: c.status?.alive !== false, last_seen_chapter: c.status?.last_seen_chapter || null })).slice(0, 30);
+    const hard = [];
+    state.characters.forEach(c => {
+      if (c.status?.alive === false) hard.push(`${c.name} is dead after chapter ${c.status?.last_seen_chapter || '?'} and cannot reappear.`);
+      if (c.status?.whereabouts) hard.push(`${c.name} is in ${c.status.whereabouts}.`);
+    });
+    return {
+      bible_summary: (bible.canon || '').slice(0, 4000),
+      global_tone_style: bible.tone_style_guide || [],
+      characters_index: charSummary,
+      plan: state.plan.map(({ chapter, synopsis, key_events, pov, target_words }) => ({ chapter, synopsis, key_events, pov, target_words })).slice(0, 40),
+      hard_constraints: hard
+    };
+  }
+
+  function promptPreviewForChapter(chapter) {
+    const canon = canonSummary();
+    const plan = state.plan.find(p => p.chapter === chapter) || {};
+    const request = {
+      canon_facts: canon,
+      draft_request: {
+        chapter,
+        target_words: plan.target_words || state.config.chap_words,
+        pov: plan.pov || state.config.pov || 'unspecified',
+        specifics: plan.key_events || []
+      }
+    };
+    return JSON.stringify(request, null, 2);
+  }
+
+  function markdownToXhtml(md) {
+    const html = md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.*)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.*)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\n\n/g, '</p><p>');
+    return `<p>${html}</p>`;
+  }
+
+  function createTokenWarning(text) {
+    const warning = document.createElement('p');
+    warning.className = 'small';
+    warning.textContent = text;
+    return warning;
+  }
+
+  async function generateWithStreaming({ introText, promptBuilder, onToken, structured }) {
+    try {
+      showToast(introText, { duration: 2000 });
+      const messages = promptBuilder();
+      let full = '';
+      for await (const token of orChat({
+        model: state.config.model,
+        messages,
+        temperature: state.config.temperature,
+        top_p: state.config.top_p,
+        seed: state.config.seed,
+        stream: !structured,
+        structuredSchema: structured ? structured.schema : undefined
+      })) {
+        full += token;
+        onToken && onToken(full, token);
+      }
+      if (structured) {
+        const parsed = JSON.parse(full);
+        const err = validateJson(structured.schema, parsed);
+        if (err) throw new Error('Schema validation failed: ' + err);
+        structured.onComplete(parsed);
+      }
+      hideToast();
+    } catch (err) {
+      console.error(err);
+      showToast('Generation failed: ' + err.message, { persistent: true, actionText: 'Close', onAction: hideToast });
+    }
+  }
+
+  function downloadSettings() {
+    const data = { keys: state.keys };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, 'novelgen-settings.json');
+  }
+
+  function loadSettingsFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const json = JSON.parse(reader.result);
+          state.keys = Object.assign(state.keys, json.keys || {});
+          saveState();
+          render();
+        } catch (err) {
+          showToast('Invalid settings file.');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function downloadProject(includeKeys = false) {
+    const data = JSON.parse(JSON.stringify(state));
+    if (!includeKeys) data.keys = {};
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadBlob(blob, `${slugify(state.meta.title || 'novel')}-project.json`);
+  }
+
+  function slugify(str) {
+    return (str || 'novel').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  }
+
+  function importProject() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,.zip';
+    input.onchange = async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        try {
+          const json = JSON.parse(text);
+          state = Object.assign(defaults(), json);
+          saveState();
+          render();
+        } catch (err) {
+          showToast('Invalid project JSON.');
+        }
+      } else if (file.name.endsWith('.zip')) {
+        const zip = await JSZip.loadAsync(file);
+        const projectFile = zip.file(/project\.json$/i)[0];
+        if (!projectFile) {
+          showToast('Zip missing project.json');
+          return;
+        }
+        const json = JSON.parse(await projectFile.async('string'));
+        state = Object.assign(defaults(), json);
+        if (zip.file(/cover\.(png|jpg|jpeg)$/i)[0]) {
+          const coverData = await zip.file(/cover\.(png|jpg|jpeg)$/i)[0].async('base64');
+          state.cover = state.cover || {};
+          state.cover.dataUrl = 'data:image/png;base64,' + coverData;
+        }
+        saveState();
+        render();
+      }
+    };
+    input.click();
+  }
+
+  async function exportBundle() {
+    const zip = new JSZip();
+    const projectData = JSON.parse(JSON.stringify(state));
+    projectData.keys = {};
+    zip.file('project.json', JSON.stringify(projectData, null, 2));
+    if (state.cover?.dataUrl) {
+      const base64 = state.cover.dataUrl.split(',')[1];
+      zip.file('cover.png', base64, { base64: true });
+    }
+    const chapters = zip.folder('chapters');
+    (state.drafts || []).forEach(d => {
+      chapters.file(`chapter-${d.chapter}.md`, d.content_md || '');
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(blob, `${slugify(state.meta.title)}-bundle.zip`);
+  }
+
+  async function buildEpub() {
+    if (!state.meta.title || !state.drafts.length) {
+      showToast('Need a title and at least one chapter draft.');
+      return;
+    }
+    const zip = new JSZip();
+    zip.file('mimetype', 'application/epub+zip');
+    const containerXml = `<?xml version="1.0"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n  <rootfiles>\n    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n  </rootfiles>\n</container>`;
+    zip.folder('META-INF').file('container.xml', containerXml);
+    const oebps = zip.folder('OEBPS');
+    const manifestItems = [];
+    const spineItems = [];
+    oebps.file('styles.css', `body { font-family: serif; line-height: 1.6; margin: 1em; } h1,h2 { text-align: center; }`);
+    manifestItems.push({ id: 'css', href: 'styles.css', mediaType: 'text/css' });
+    if (state.cover?.dataUrl) {
+      const base64 = state.cover.dataUrl.split(',')[1];
+      oebps.folder('images').file('cover.png', base64, { base64: true });
+      manifestItems.push({ id: 'cover-img', href: 'images/cover.png', mediaType: 'image/png', properties: 'cover-image' });
+      oebps.file('cover.xhtml', `<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head><title>Cover</title><link rel=\"stylesheet\" href=\"styles.css\"/></head>\n<body><div><img src=\"images/cover.png\" alt=\"Cover\" style=\"max-width:100%;\"/></div></body></html>`);
+      manifestItems.push({ id: 'cover', href: 'cover.xhtml', mediaType: 'application/xhtml+xml' });
+      spineItems.push({ idref: 'cover', linear: 'no' });
+    }
+    const navItems = [];
+    state.drafts.sort((a,b) => a.chapter - b.chapter).forEach((draft, idx) => {
+      const fileName = `chapter-${draft.chapter}.xhtml`;
+      const xhtml = `<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head><title>${draft.chapter}. ${state.plan.find(p => p.chapter === draft.chapter)?.title || 'Chapter'}</title><link rel=\"stylesheet\" href=\"styles.css\"/></head>\n<body><h1>Chapter ${draft.chapter}</h1>${markdownToXhtml(draft.content_md || '')}</body></html>`;
+      oebps.file(fileName, xhtml);
+      manifestItems.push({ id: `chap${idx+1}`, href: fileName, mediaType: 'application/xhtml+xml' });
+      spineItems.push({ idref: `chap${idx+1}`, linear: 'yes' });
+      navItems.push(`<li><a href="${fileName}">Chapter ${draft.chapter}</a></li>`);
+    });
+    const nav = `<?xml version="1.0" encoding="utf-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head><title>TOC</title><link rel="stylesheet" href="styles.css"/></head>\n<body><nav epub:type="toc"><h1>Contents</h1><ol>${navItems.join('')}</ol></nav></body></html>`;
+    oebps.file('nav.xhtml', nav);
+    manifestItems.push({ id: 'nav', href: 'nav.xhtml', mediaType: 'application/xhtml+xml', properties: 'nav' });
+    const metadata = `<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${state.meta.title}</dc:title><dc:creator>${state.meta.author}</dc:creator><dc:language>en</dc:language><meta property="dcterms:modified">${new Date().toISOString()}</meta></metadata>`;
+    const manifestXml = manifestItems.map(item => `<item id="${item.id}" href="${item.href}" media-type="${item.mediaType}"${item.properties ? ` properties="${item.properties}"` : ''}/>`).join('\n    ');
+    const spineXml = spineItems.map(item => `<itemref idref="${item.idref}" linear="${item.linear}"/>`).join('\n    ');
+    const contentOpf = `<?xml version="1.0" encoding="utf-8"?>\n<package version="3.0" unique-identifier="BookId" xmlns="http://www.idpf.org/2007/opf">\n  ${metadata}\n  <manifest>\n    ${manifestXml}\n  </manifest>\n  <spine>\n    ${spineXml}\n  </spine>\n</package>`;
+    oebps.file('content.opf', contentOpf);
+    const blob = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(blob, `${slugify(state.meta.title)}.epub`);
+    showToast('EPUB exported.');
+  }
+
+  async function continuityCheck(chapterDraft) {
+    const canon = canonSummary();
+    const messages = [
+      { role: 'system', content: 'You are a continuity validator. Inspect the provided chapter against canon facts and list violations as precise strings. Return JSON only.' },
+      { role: 'user', content: JSON.stringify({ canon_facts: canon, chapter: chapterDraft.chapter, content: chapterDraft.content_md }) }
+    ];
+    let full = '';
+    for await (const token of orChat({
+      model: state.config.model,
+      messages,
+      temperature: 0,
+      top_p: 1,
+      stream: true,
+      structuredSchema: structuredSchemas.continuity
+    })) {
+      full += token;
+    }
+    const parsed = JSON.parse(full);
+    const err = validateJson(structuredSchemas.continuity, parsed);
+    if (err) throw new Error(err);
+    chapterDraft.violations = parsed.violations || [];
+    scheduleAutosave();
+    render();
+  }
+
+  function populateCharacterList(container) {
+    container.innerHTML = '';
+    state.characters.forEach(char => {
+      const card = document.createElement('div');
+      card.className = 'chapter-card';
+      card.innerHTML = `
+        <div class="flex">
+          <div class="flex-2">
+            <strong>${char.name}</strong> <span class="badge">${char.role}</span>
+            <p class="small">${char.bio}</p>
+            <p class="small">Traits: ${(char.traits || []).join(', ')}</p>
+            <p class="small">Goals: ${(char.arcs || []).join('; ')}</p>
+          </div>
+          <div class="flex-1 small">
+            <p>Status: ${char.status?.alive === false ? 'Deceased' : 'Alive'}</p>
+            <p>Whereabouts: ${char.status?.whereabouts || 'Unknown'}</p>
+            <p>Last seen: ${char.status?.last_seen_chapter || 'n/a'}</p>
+          </div>
+        </div>`;
+      const editBtn = document.createElement('button');
+      editBtn.className = 'secondary';
+      editBtn.textContent = 'Edit';
+      editBtn.onclick = () => openCharacterEditor(char);
+      card.appendChild(editBtn);
+      container.appendChild(card);
+    });
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add Character';
+    addBtn.onclick = () => {
+      const char = {
+        id: uuidv4(),
+        name: 'New Character',
+        role: 'role',
+        bio: '',
+        traits: [],
+        arcs: [],
+        status: { alive: true },
+        continuity_flags: {}
+      };
+      state.characters.push(char);
+      scheduleAutosave();
+      render();
+      openCharacterEditor(char);
+    };
+    container.appendChild(addBtn);
+  }
+  function openCharacterEditor(character) {
+    const modal = document.createElement('div');
+    modal.className = 'panel';
+    modal.style.position = 'fixed';
+    modal.style.top = '10%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translateX(-50%)';
+    modal.style.zIndex = 1000;
+    modal.style.maxWidth = '600px';
+    modal.style.maxHeight = '80vh';
+    modal.style.overflowY = 'auto';
+    modal.innerHTML = `<h2>Edit ${character.name}</h2>`;
+    const nameInput = createInput('text', character.name);
+    nameInput.oninput = () => { character.name = nameInput.value; scheduleAutosave(); };
+    const roleInput = createInput('text', character.role);
+    roleInput.oninput = () => { character.role = roleInput.value; scheduleAutosave(); };
+    const bioArea = createTextarea(character.bio);
+    bioArea.oninput = () => { character.bio = bioArea.value; scheduleAutosave(); };
+    const traitsInput = createInput('text', (character.traits || []).join(', '));
+    traitsInput.oninput = () => { character.traits = traitsInput.value.split(',').map(s => s.trim()).filter(Boolean); scheduleAutosave(); };
+    const arcsInput = createInput('text', (character.arcs || []).join(', '));
+    arcsInput.oninput = () => { character.arcs = arcsInput.value.split(',').map(s => s.trim()).filter(Boolean); scheduleAutosave(); };
+    const aliveCheckbox = document.createElement('input');
+    aliveCheckbox.type = 'checkbox';
+    aliveCheckbox.checked = character.status?.alive !== false;
+    aliveCheckbox.onchange = () => { character.status.alive = aliveCheckbox.checked; scheduleAutosave(); };
+    const whereInput = createInput('text', character.status?.whereabouts || '');
+    whereInput.oninput = () => { character.status.whereabouts = whereInput.value; scheduleAutosave(); };
+    const lastSeenInput = createInput('number', character.status?.last_seen_chapter || '');
+    lastSeenInput.oninput = () => { character.status.last_seen_chapter = parseInt(lastSeenInput.value || '0', 10); scheduleAutosave(); };
+    const flagsArea = createTextarea(JSON.stringify(character.continuity_flags || {}, null, 2));
+    flagsArea.oninput = () => {
+      try {
+        character.continuity_flags = JSON.parse(flagsArea.value || '{}');
+      } catch (err) {
+      }
+    };
+    modal.append(labelWrap('Name', nameInput));
+    modal.append(labelWrap('Role', roleInput));
+    modal.append(labelWrap('Bio', bioArea));
+    modal.append(labelWrap('Traits (comma separated)', traitsInput));
+    modal.append(labelWrap('Arcs (comma separated)', arcsInput));
+    modal.append(labelWrap('Alive?', aliveCheckbox));
+    modal.append(labelWrap('Whereabouts', whereInput));
+    modal.append(labelWrap('Last seen chapter', lastSeenInput));
+    modal.append(labelWrap('Continuity flags JSON', flagsArea));
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.onclick = () => {
+      document.body.removeChild(modal);
+      scheduleAutosave();
+      render();
+    };
+    modal.append(closeBtn);
+    document.body.appendChild(modal);
+  }
+
+  function continuityPanel() {
+    const container = document.createElement('div');
+    (state.drafts || []).forEach(draft => {
+      const panel = document.createElement('div');
+      panel.className = 'chapter-card';
+      panel.innerHTML = `<h3>Chapter ${draft.chapter}</h3>`;
+      const violations = document.createElement('div');
+      violations.innerHTML = (draft.violations || []).length ? `<ul>${draft.violations.map(v => `<li>${v}</li>`).join('')}</ul>` : '<p class="small">No violations recorded.</p>';
+      panel.appendChild(violations);
+      const checkBtn = document.createElement('button');
+      checkBtn.textContent = 'Run Continuity Check';
+      checkBtn.onclick = () => continuityCheck(draft);
+      panel.appendChild(checkBtn);
+      container.appendChild(panel);
+    });
+    return container;
+  }
+
+  function renderDraftEditor(draft, container) {
+    const area = createTextarea(draft.content_md || '', { spellcheck: true });
+    area.addEventListener('input', () => {
+      draft.content_md = area.value;
+      scheduleAutosave();
+    });
+    container.append(labelWrap(`Chapter ${draft.chapter} Draft`, area));
+    if (draft.violations?.length) {
+      const warning = document.createElement('div');
+      warning.innerHTML = `<strong>Continuity violations:</strong><ul>${draft.violations.map(v => `<li>${v}</li>`).join('')}</ul>`;
+      container.appendChild(warning);
+    }
+    const promptPre = document.createElement('pre');
+    promptPre.className = 'prompt-preview';
+    promptPre.textContent = promptPreviewForChapter(draft.chapter);
+    container.appendChild(promptPre);
+    const genBtn = document.createElement('button');
+    genBtn.textContent = 'Generate Draft';
+    genBtn.onclick = () => {
+      generateWithStreaming({
+        introText: 'Generating chapter draft...',
+        promptBuilder: () => [
+          { role: 'system', content: 'You are a continuity-safe fiction writer. Obey the facts and constraints in JSON under canon_facts. Never revive dead characters unless the plan specifies it. Maintain POV, tense, and style guide. Respect target word count ±10%.' },
+          { role: 'user', content: promptPreviewForChapter(draft.chapter) }
+        ],
+        onToken(full) {
+          draft.content_md = full;
+          area.value = full;
+        }
+      });
+    };
+    const checkBtn = document.createElement('button');
+    checkBtn.className = 'secondary';
+    checkBtn.textContent = 'Continuity Check';
+    checkBtn.onclick = () => continuityCheck(draft);
+    container.append(genBtn, checkBtn);
+  }
+
+  function renderDraftsPanel() {
+    const container = document.createElement('div');
+    (state.plan || []).forEach(plan => {
+      let draft = state.drafts.find(d => d.chapter === plan.chapter);
+      if (!draft) {
+        draft = { chapter: plan.chapter, content_md: '', notes: '', violations: [] };
+        state.drafts.push(draft);
+      }
+      const panel = document.createElement('div');
+      panel.className = 'panel';
+      panel.innerHTML = `<h3>Chapter ${plan.chapter}: ${plan.title}</h3><p class="small">${plan.synopsis}</p>`;
+      renderDraftEditor(draft, panel);
+      container.appendChild(panel);
+    });
+    return container;
+  }
+
+  async function generateIdeaExpansion() {
+    const ideaInput = document.getElementById('idea-text');
+    state.idea = ideaInput.value;
+    const expansionArea = document.getElementById('expansion-text');
+    expansionArea.value = '';
+    await generateWithStreaming({
+      introText: 'Expanding idea...',
+      promptBuilder: () => [
+        { role: 'system', content: 'You are a creative writing development assistant who expands short novel ideas into detailed notes.' },
+        { role: 'user', content: JSON.stringify({ idea: state.idea, genre: state.meta.genre, themes: state.meta.themes }) }
+      ],
+      onToken(full) {
+        state.expansion = full;
+        expansionArea.value = full;
+      }
+    });
+    scheduleAutosave();
+  }
+
+  async function generateWorldBible() {
+    await generateWithStreaming({
+      introText: 'Generating world bible...',
+      structured: { schema: structuredSchemas.worldBible, onComplete(result) { state.bible = result.bible; scheduleAutosave(); render(); } },
+      promptBuilder: () => [
+        { role: 'system', content: 'You produce concise world bibles in JSON. Keep timeline ordered and respect any banned elements.' },
+        { role: 'user', content: JSON.stringify({ idea: state.idea, expansion: state.expansion, banned: state.config.banned }) }
+      ],
+      onToken(full) {}
+    });
+  }
+
+  async function generatePlan() {
+    await generateWithStreaming({
+      introText: 'Generating story plan...',
+      structured: { schema: structuredSchemas.plan, onComplete(result) {
+        state.plan = result.plan;
+        if (result.characters?.length) {
+          result.characters.forEach(char => {
+            if (!state.characters.find(c => c.id === char.id)) state.characters.push(char);
+          });
+        }
+        scheduleAutosave();
+        render();
+      } },
+      promptBuilder: () => [
+        { role: 'system', content: 'You are a meticulous story architect. Produce structured JSON chapter plans and optional character sheets. Ensure consistency with the provided bible and banned items.' },
+        { role: 'user', content: JSON.stringify({ bible: state.bible, idea: state.idea, expansion: state.expansion, chapter_count: state.config.chap_count, target_words: state.config.chap_words }) }
+      ],
+      onToken(){}
+    });
+  }
+
+  async function generateCharacters() {
+    await generateWithStreaming({
+      introText: 'Generating character sheets...',
+      promptBuilder: () => [
+        { role: 'system', content: 'Create detailed character bios. Return markdown bullet lists only.' },
+        { role: 'user', content: JSON.stringify({ bible: state.bible, plan: state.plan }) }
+      ],
+      onToken(full) {
+        state.charactersNotes = full;
+        scheduleAutosave();
+      }
+    });
+  }
+
+  async function generateCover(model) {
+    if (model === 'openrouter') {
+      if (!state.config.image_model) {
+        showToast('Select an image-capable model.');
+        return;
+      }
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/images', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${state.keys.openrouter}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: state.config.image_model,
+            prompt: state.cover?.prompt || `${state.meta.title} cover art, ${state.meta.genre} novel`,
+            size: '1024x1536'
+          })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        const image = data.data?.[0]?.b64_json;
+        if (!image) throw new Error('No image returned');
+        state.cover = state.cover || {};
+        state.cover.dataUrl = 'data:image/png;base64,' + image;
+        scheduleAutosave();
+        render();
+      } catch (err) {
+        console.error(err);
+        showToast('Cover generation failed: ' + err.message);
+      }
+    } else if (model === 'gemini') {
+      if (!state.keys.gemini) {
+        showToast('Add Gemini key first.');
+        return;
+      }
+      try {
+        const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateImage?key=' + state.keys.gemini, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: state.cover?.prompt || `${state.meta.title} book cover`, size: '1024x1536' })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        const image = data?.generatedImages?.[0]?.bytesBase64;
+        if (!image) throw new Error('No image returned');
+        state.cover = state.cover || {};
+        state.cover.dataUrl = 'data:image/png;base64,' + image;
+        scheduleAutosave();
+        render();
+      } catch (err) {
+        console.error(err);
+        showToast('Gemini cover failed: ' + err.message);
+      }
+    }
+  }
+  function renderCoverPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = '<h2>Cover Generator</h2>';
+    const prompt = createTextarea(state.cover?.prompt || '', { placeholder: 'Cover prompt' });
+    prompt.addEventListener('input', () => { state.cover = state.cover || {}; state.cover.prompt = prompt.value; scheduleAutosave(); });
+    panel.appendChild(prompt);
+    const select = document.createElement('select');
+    select.innerHTML = '<option value="openrouter">OpenRouter Image Model</option><option value="gemini">Google Gemini</option>';
+    panel.appendChild(labelWrap('Cover model route', select));
+    const imageModelSelect = document.createElement('select');
+    imageModelSelect.innerHTML = '<option value="">Select image model</option>';
+    imageModelsCache.forEach(model => {
+      const opt = document.createElement('option');
+      opt.value = model.id;
+      opt.textContent = model.id;
+      imageModelSelect.appendChild(opt);
+    });
+    imageModelSelect.value = state.config.image_model || '';
+    imageModelSelect.onchange = () => { state.config.image_model = imageModelSelect.value; scheduleAutosave(); };
+    panel.appendChild(labelWrap('OpenRouter image model', imageModelSelect));
+    const genBtn = document.createElement('button');
+    genBtn.textContent = 'Generate Cover';
+    genBtn.onclick = () => generateCover(select.value);
+    const uploadInput = document.createElement('input');
+    uploadInput.type = 'file';
+    uploadInput.accept = 'image/*';
+    uploadInput.onchange = async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        state.cover = state.cover || {};
+        state.cover.dataUrl = reader.result;
+        scheduleAutosave();
+        render();
+      };
+      reader.readAsDataURL(file);
+    };
+    const uploadLabel = document.createElement('label');
+    uploadLabel.textContent = 'Upload cover image';
+    uploadLabel.appendChild(uploadInput);
+    panel.append(genBtn, uploadLabel);
+    if (state.cover?.dataUrl) {
+      const canvas = document.createElement('canvas');
+      canvas.id = 'cover-canvas';
+      canvas.width = 768;
+      canvas.height = 1152;
+      panel.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.fillRect(0, canvas.height - 140, canvas.width, 140);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 36px serif';
+        ctx.fillText(state.meta.title || 'Title', 20, canvas.height - 80);
+        ctx.font = '24px serif';
+        ctx.fillText(state.meta.author || 'Author', 20, canvas.height - 40);
+      };
+      img.src = state.cover.dataUrl;
+      const downloadBtn = document.createElement('button');
+      downloadBtn.textContent = 'Download Cover';
+      downloadBtn.onclick = () => {
+        canvas.toBlob(blob => downloadBlob(blob, `${slugify(state.meta.title)}-cover.png`));
+      };
+      panel.appendChild(downloadBtn);
+    }
+    return panel;
+  }
+
+  function renderExportPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.innerHTML = '<h2>Export / Import</h2>';
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Download Project JSON (no keys)';
+    exportBtn.onclick = () => downloadProject(false);
+    const exportKeysBtn = document.createElement('button');
+    exportKeysBtn.className = 'secondary';
+    exportKeysBtn.textContent = 'Download Project JSON (include keys)';
+    exportKeysBtn.onclick = () => downloadProject(true);
+    const bundleBtn = document.createElement('button');
+    bundleBtn.textContent = 'Export Bundle (.zip)';
+    bundleBtn.onclick = exportBundle;
+    const importBtn = document.createElement('button');
+    importBtn.className = 'secondary';
+    importBtn.textContent = 'Import Project';
+    importBtn.onclick = importProject;
+    panel.append(exportBtn, exportKeysBtn, bundleBtn, importBtn);
+    return panel;
+  }
+
+  const stepRenderers = [
+    function setupStep(container) {
+      const panel = createSection('Project Setup');
+      const titleInput = createInput('text', state.meta.title, { placeholder: 'Novel title' });
+      titleInput.addEventListener('input', () => { state.meta.title = titleInput.value; scheduleAutosave(); render(); });
+      panel.appendChild(labelWrap('Title', titleInput));
+      const authorInput = createInput('text', state.meta.author, { placeholder: 'Pen name' });
+      authorInput.addEventListener('input', () => { state.meta.author = authorInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Author pen name', authorInput));
+      const genreInput = createInput('text', state.meta.genre || '', { placeholder: 'Genre' });
+      genreInput.addEventListener('input', () => { state.meta.genre = genreInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Genre', genreInput));
+      const themesInput = createInput('text', state.meta.themes || '', { placeholder: 'Themes (comma separated)' });
+      themesInput.addEventListener('input', () => { state.meta.themes = themesInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Themes', themesInput));
+      const compsArea = createTextarea(state.meta.comps || '', { placeholder: 'Comparables / influences' });
+      compsArea.addEventListener('input', () => { state.meta.comps = compsArea.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Comps & influences', compsArea));
+      const audienceInput = createInput('text', state.meta.audience || '', { placeholder: 'Audience & tone' });
+      audienceInput.addEventListener('input', () => { state.meta.audience = audienceInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Audience & tone', audienceInput));
+      const povInput = createInput('text', state.config.pov || '', { placeholder: 'Point of view' });
+      povInput.addEventListener('input', () => { state.config.pov = povInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('POV', povInput));
+      const ratingInput = createInput('text', state.meta.rating || '', { placeholder: 'Target rating' });
+      ratingInput.addEventListener('input', () => { state.meta.rating = ratingInput.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Target content rating', ratingInput));
+      const bannedArea = createTextarea((state.config.banned || []).join('\n'), { placeholder: 'Banned / avoid list, one per line' });
+      bannedArea.addEventListener('input', () => { state.config.banned = bannedArea.value.split('\n').map(x => x.trim()).filter(Boolean); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Banned / avoid list', bannedArea));
+      const chapCount = createInput('number', state.config.chap_count || 12);
+      chapCount.addEventListener('input', () => { state.config.chap_count = parseInt(chapCount.value || '0', 10); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Chapter count', chapCount));
+      const chapWords = createInput('number', state.config.chap_words || 2000);
+      chapWords.addEventListener('input', () => { state.config.chap_words = parseInt(chapWords.value || '0', 10); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Target words per chapter', chapWords));
+      const modelSelect = document.createElement('select');
+      populateModelsDropdown(modelSelect);
+      modelSelect.value = state.config.model || '';
+      modelSelect.addEventListener('change', () => { state.config.model = modelSelect.value; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Model (OpenRouter)', modelSelect));
+      const tempInput = createInput('number', state.config.temperature, { step: '0.1', min: '0', max: '2' });
+      tempInput.addEventListener('input', () => { state.config.temperature = parseFloat(tempInput.value); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Temperature', tempInput));
+      const topPInput = createInput('number', state.config.top_p, { step: '0.05', min: '0', max: '1' });
+      topPInput.addEventListener('input', () => { state.config.top_p = parseFloat(topPInput.value); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Top P', topPInput));
+      const seedInput = createInput('number', state.config.seed || '', { placeholder: 'Seed (optional)' });
+      seedInput.addEventListener('input', () => { state.config.seed = seedInput.value ? parseInt(seedInput.value, 10) : undefined; scheduleAutosave(); });
+      panel.appendChild(labelWrap('Seed', seedInput));
+      const keyPanel = renderKeyPanel();
+      panel.appendChild(keyPanel);
+      const creditBtn = document.createElement('button');
+      creditBtn.className = 'secondary';
+      creditBtn.textContent = 'Check Credits / Rate Limit';
+      creditBtn.onclick = () => checkCredits();
+      panel.appendChild(creditBtn);
+      if (!modelsCache.length && state.keys.openrouter) {
+        fetchModels();
+      }
+    },
+    function ideaStep(container) {
+      const panel = createSection('Idea → Expansion');
+      const idea = createTextarea(state.idea, { id: 'idea-text', placeholder: 'Write your core idea here...' });
+      idea.addEventListener('input', () => { state.idea = idea.value; scheduleAutosave(); });
+      panel.appendChild(idea);
+      const expandBtn = document.createElement('button');
+      expandBtn.textContent = 'Brainstorm & Expand';
+      expandBtn.onclick = generateIdeaExpansion;
+      panel.appendChild(expandBtn);
+      const expansion = createTextarea(state.expansion || '', { id: 'expansion-text', placeholder: 'Expanded concept notes appear here', minHeight: '200px' });
+      expansion.addEventListener('input', () => { state.expansion = expansion.value; scheduleAutosave(); });
+      panel.appendChild(expansion);
+    },
+    function bibleStep(container) {
+      const panel = createSection('World Bible');
+      const canonArea = createTextarea(state.bible?.canon || '', { placeholder: 'Canon markdown' });
+      canonArea.addEventListener('input', () => { state.bible.canon = canonArea.value; scheduleAutosave(); });
+      panel.appendChild(canonArea);
+      const timelineArea = createTextarea((state.bible?.timeline || []).join('\n'), { placeholder: 'Timeline entries' });
+      timelineArea.addEventListener('input', () => { state.bible.timeline = timelineArea.value.split('\n').filter(Boolean); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Timeline', timelineArea));
+      const locationsArea = createTextarea((state.bible?.locations || []).join('\n'), { placeholder: 'Locations' });
+      locationsArea.addEventListener('input', () => { state.bible.locations = locationsArea.value.split('\n').filter(Boolean); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Locations', locationsArea));
+      const rulesArea = createTextarea((state.bible?.rules || []).join('\n'), { placeholder: 'Rules / magic / tech' });
+      rulesArea.addEventListener('input', () => { state.bible.rules = rulesArea.value.split('\n').filter(Boolean); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Rules', rulesArea));
+      const toneArea = createTextarea((state.bible?.tone_style_guide || []).join('\n'), { placeholder: 'Tone & style guardrails' });
+      toneArea.addEventListener('input', () => { state.bible.tone_style_guide = toneArea.value.split('\n').filter(Boolean); scheduleAutosave(); });
+      panel.appendChild(labelWrap('Tone & Style', toneArea));
+      const genBtn = document.createElement('button');
+      genBtn.textContent = 'Generate Bible';
+      genBtn.onclick = generateWorldBible;
+      const rerollBtn = document.createElement('button');
+      rerollBtn.className = 'secondary';
+      rerollBtn.textContent = 'Re-roll';
+      rerollBtn.onclick = generateWorldBible;
+      panel.append(genBtn, rerollBtn);
+    },
+    function planStep(container) {
+      const panel = createSection('Story Arc & Chapter Plan');
+      const planList = document.createElement('div');
+      planList.className = 'grid two';
+      (state.plan || []).forEach(plan => {
+        const card = document.createElement('div');
+        card.className = 'chapter-card';
+        card.innerHTML = `<strong>Chapter ${plan.chapter}: ${plan.title}</strong><p class="small">${plan.synopsis}</p><p class="small">Beats: ${(plan.beats || []).join(', ')}</p>`;
+        planList.appendChild(card);
+      });
+      panel.appendChild(planList);
+      const genBtn = document.createElement('button');
+      genBtn.textContent = 'Generate Outline';
+      genBtn.onclick = generatePlan;
+      panel.appendChild(genBtn);
+    },
+    function charactersStep(container) {
+      const panel = createSection('Characters');
+      const list = document.createElement('div');
+      populateCharacterList(list);
+      panel.appendChild(list);
+      const genBtn = document.createElement('button');
+      genBtn.textContent = 'Generate Character Notes';
+      genBtn.onclick = generateCharacters;
+      panel.appendChild(genBtn);
+      if (state.charactersNotes) {
+        const notes = document.createElement('pre');
+        notes.className = 'prompt-preview';
+        notes.textContent = state.charactersNotes;
+        panel.appendChild(notes);
+      }
+    },
+    function draftsStep(container) {
+      const header = createSection('Draft Chapters');
+      header.appendChild(createTokenWarning('Streaming text will appear inside each chapter editor. Edit before moving on.'));
+      header.appendChild(renderDraftsPanel());
+    },
+    function continuityStep(container) {
+      const panel = createSection('Continuity Checks');
+      panel.appendChild(continuityPanel());
+    },
+    function epubStep(container) {
+      const panel = createSection('EPUB Builder');
+      const instructions = document.createElement('p');
+      instructions.textContent = 'Assemble a standards-compliant EPUB including cover, metadata, TOC, and chapter XHTML.';
+      panel.appendChild(instructions);
+      const buildBtn = document.createElement('button');
+      buildBtn.textContent = 'Build EPUB';
+      buildBtn.onclick = buildEpub;
+      panel.appendChild(buildBtn);
+      if (state.cover?.dataUrl) {
+        const coverPreview = document.createElement('img');
+        coverPreview.src = state.cover.dataUrl;
+        coverPreview.style.maxWidth = '160px';
+        coverPreview.alt = 'Cover preview';
+        panel.appendChild(coverPreview);
+      }
+    },
+    function coverExportStep(container) {
+      container.appendChild(renderCoverPanel());
+      container.appendChild(renderExportPanel());
+    }
+  ];
+
+  function nextStep() {
+    activeStep = Math.min(activeStep + 1, steps.length - 1);
+    render();
+  }
+
+  function prevStep() {
+    activeStep = Math.max(activeStep - 1, 0);
+    render();
+  }
+
+  render();
+
+  window.NovelGen = {
+    state,
+    render,
+    fetchModels,
+    nextStep,
+    prevStep
+  };
+})();
+</script>
+<!--
+TEST PLAN
+- Can load, save, and reload project.
+- Can stream long chapter generations without freezing UI.
+- Continuity engine flags “dead character reappears”.
+- EPUB validates and opens in major readers.
+- Cover generation works via either route.
+- Works from file:// and from any basic web server.
+-->
+</body>
+</html>
