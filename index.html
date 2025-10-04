@@ -401,6 +401,9 @@ textarea.prompt-preview {
     },
     continuity: {
       system: 'You are a continuity validator. Inspect the provided chapter against canon facts and list violations as precise strings. Return JSON only.'
+    },
+    continuityFix: {
+      system: 'You are a meticulous fiction editor. Given canon facts, a chapter draft, and the continuity violations that need correction, rewrite the chapter so all issues are resolved while preserving voice, POV, and plot beats. Respond with the full revised chapter text only.'
     }
   };
   const dom = {
@@ -429,7 +432,7 @@ textarea.prompt-preview {
 
   const defaults = () => ({
     meta: { title: 'Untitled Project', author: '', created: new Date().toISOString(), updated: null, version: 1 },
-    config: { model: '', temperature: 0.7, top_p: 0.9, seed: undefined, chap_count: 12, chap_words: 2000, banned: [] },
+    config: { model: '', image_model: '', temperature: 0.7, top_p: 0.9, seed: undefined, chap_count: 12, chap_words: 2000, banned: [] },
     keys: { openrouter: '', gemini: '' },
     prompts: JSON.parse(JSON.stringify(defaultPrompts)),
     idea: '',
@@ -463,19 +466,62 @@ textarea.prompt-preview {
     });
   }
 
+  function sanitizeCharacterName(name) {
+    if (!name) return '';
+    return String(name)
+      .replace(/NameID\s*[:#-]?\s*/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function normalizeCharacterRecord(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const clone = JSON.parse(JSON.stringify(raw));
+    if (clone.name_id && !clone.id) {
+      clone.id = clone.name_id;
+    }
+    delete clone.name_id;
+    const primaryName = sanitizeCharacterName(clone.name || clone.display_name || clone.alias || clone.id || '');
+    clone.name = primaryName || 'Unnamed Character';
+    clone.role = typeof clone.role === 'string' ? clone.role : '';
+    clone.bio = typeof clone.bio === 'string' ? clone.bio : '';
+    clone.traits = Array.isArray(clone.traits) ? clone.traits.map(item => String(item)).filter(Boolean) : [];
+    clone.arcs = Array.isArray(clone.arcs) ? clone.arcs.map(item => String(item)).filter(Boolean) : [];
+    const status = clone.status && typeof clone.status === 'object' ? Object.assign({}, clone.status) : {};
+    if (status.last_seen_chapter !== undefined && status.last_seen_chapter !== null) {
+      const parsed = parseInt(status.last_seen_chapter, 10);
+      status.last_seen_chapter = Number.isNaN(parsed) ? undefined : parsed;
+    }
+    if (status.alive !== false) {
+      status.alive = true;
+    }
+    clone.status = status;
+    if (clone.id !== undefined && clone.id !== null && clone.id !== '') {
+      clone.id = String(clone.id);
+    } else {
+      clone.id = uuidv4();
+    }
+    return clone;
+  }
+
   function hydrateState(raw) {
     const merged = Object.assign(defaults(), raw || {});
     applyPromptDefaults(merged);
+    merged.characters = (merged.characters || []).map(normalizeCharacterRecord).filter(Boolean);
+    merged.planCharacters = (merged.planCharacters || []).map(normalizeCharacterRecord).filter(Boolean);
     merged.drafts = (merged.drafts || []).map(draft => {
       if (!draft || typeof draft !== 'object') {
-        return { chapter: null, content_md: '', notes: '', violations: [], prompt_override: '' };
+        return { chapter: null, content_md: '', notes: '', violations: [], prompt_override: '', continuity_report: null };
       }
-      const normalized = Object.assign({ content_md: '', notes: '', violations: [], prompt_override: '' }, draft);
+      const normalized = Object.assign({ content_md: '', notes: '', violations: [], prompt_override: '', continuity_report: null }, draft);
       if (!Array.isArray(normalized.violations)) {
         normalized.violations = [];
       }
       if (typeof normalized.prompt_override !== 'string') {
         normalized.prompt_override = '';
+      }
+      if (!normalized.continuity_report || typeof normalized.continuity_report !== 'object') {
+        normalized.continuity_report = null;
       }
       return normalized;
     });
@@ -1152,8 +1198,19 @@ textarea.prompt-preview {
     const charSummary = state.characters.map(c => ({ id: c.id, name: c.name, alive: c.status?.alive !== false, last_seen_chapter: c.status?.last_seen_chapter || null })).slice(0, 30);
     const hard = [];
     state.characters.forEach(c => {
-      if (c.status?.alive === false) hard.push(`${c.name} is dead after chapter ${c.status?.last_seen_chapter || '?'} and cannot reappear.`);
-      if (c.status?.whereabouts) hard.push(`${c.name} is in ${c.status.whereabouts}.`);
+      const resolvedName = sanitizeCharacterName(c?.name || '') || sanitizeCharacterName(c?.id || '');
+      if (!resolvedName) return;
+      charSummary.push({
+        name: resolvedName,
+        alive: c.status?.alive !== false,
+        last_seen_chapter: c.status?.last_seen_chapter ?? null
+      });
+      if (c.status?.alive === false) {
+        hard.push(`${resolvedName} is dead after chapter ${c.status?.last_seen_chapter || '?'} and cannot reappear.`);
+      }
+      if (c.status?.whereabouts) {
+        hard.push(`${resolvedName} is in ${c.status.whereabouts}.`);
+      }
     });
     return {
       project_overview: overview,
@@ -1472,6 +1529,7 @@ textarea.prompt-preview {
         name: 'Continuity report JSON',
         onComplete(result) {
           chapterDraft.violations = result.violations || [];
+          chapterDraft.continuity_report = result;
           scheduleAutosave();
           render();
         }
@@ -1479,6 +1537,43 @@ textarea.prompt-preview {
       configOverrides: { temperature: 0, top_p: 1 },
       onToken() {}
     });
+  }
+
+  async function continuityAutoCorrect(chapterDraft) {
+    const issues = Array.isArray(chapterDraft.violations) ? chapterDraft.violations : [];
+    if (!issues.length) {
+      showToast('No continuity issues to fix. Run a check first.', { duration: 3000 });
+      return;
+    }
+    const canon = canonSummary();
+    const payload = {
+      chapter: chapterDraft.chapter,
+      canon_facts: canon,
+      continuity_violations: issues,
+      continuity_report: chapterDraft.continuity_report || { violations: issues },
+      original_chapter: chapterDraft.content_md || ''
+    };
+    await generateWithStreaming({
+      introText: 'Applying continuity corrections...',
+      promptBuilder: () => [
+        { role: 'system', content: state.prompts?.continuityFix?.system || defaultPrompts.continuityFix.system },
+        { role: 'user', content: JSON.stringify(payload) }
+      ],
+      onToken(full) {
+        chapterDraft.content_md = full;
+        const draftArea = document.querySelector(`textarea[data-draft-chapter="${chapterDraft.chapter}"]`);
+        if (draftArea) {
+          draftArea.value = full;
+          scrollTextareaToBottom(draftArea);
+        }
+      },
+      configOverrides: { temperature: 0.4, top_p: 0.9 }
+    });
+    chapterDraft.violations = [];
+    chapterDraft.continuity_report = null;
+    scheduleAutosave();
+    render();
+    showToast('Continuity corrections applied. Review the chapter and rerun the check.', { duration: 4000 });
   }
 
   function populateCharacterList(container) {
@@ -1646,6 +1741,17 @@ textarea.prompt-preview {
       checkBtn.textContent = 'Run Continuity Check';
       checkBtn.onclick = () => continuityCheck(draft);
       panel.appendChild(checkBtn);
+      const fixBtn = document.createElement('button');
+      fixBtn.className = 'secondary';
+      fixBtn.textContent = 'Auto-correct with AI';
+      if (!draft.violations?.length) {
+        fixBtn.disabled = true;
+        fixBtn.title = 'Run a continuity check to collect issues first.';
+      } else {
+        fixBtn.title = 'Rewrite this chapter with the continuity fixes applied.';
+      }
+      fixBtn.onclick = () => continuityAutoCorrect(draft);
+      panel.appendChild(fixBtn);
       container.appendChild(panel);
     });
     return container;
@@ -1653,6 +1759,7 @@ textarea.prompt-preview {
 
   function renderDraftEditor(draft, container) {
     const area = createTextarea(draft.content_md || '', { spellcheck: true });
+    area.dataset.draftChapter = String(draft.chapter);
     area.addEventListener('input', () => {
       draft.content_md = area.value;
       scheduleAutosave();
@@ -1705,7 +1812,17 @@ textarea.prompt-preview {
     checkBtn.className = 'secondary';
     checkBtn.textContent = 'Continuity Check';
     checkBtn.onclick = () => continuityCheck(draft);
-    container.append(resetPromptBtn, genBtn, checkBtn);
+    const fixBtn = document.createElement('button');
+    fixBtn.className = 'secondary';
+    fixBtn.textContent = 'Auto-fix Continuity';
+    if (!draft.violations?.length) {
+      fixBtn.disabled = true;
+      fixBtn.title = 'Run a continuity check to enable auto-fix.';
+    } else {
+      fixBtn.title = 'Rewrite this chapter using the continuity findings.';
+    }
+    fixBtn.onclick = () => continuityAutoCorrect(draft);
+    container.append(resetPromptBtn, genBtn, checkBtn, fixBtn);
   }
 
   function renderDraftsPanel() {
@@ -1800,10 +1917,17 @@ textarea.prompt-preview {
         state.planCharacters = JSON.parse(JSON.stringify(result.characters || []));
         activeDraftTab = state.plan.length ? state.plan[0].chapter : null;
         state.characters = state.characters || [];
-        if (result.characters?.length) {
-          result.characters.forEach(char => {
-            if (!state.characters.find(c => c.id === char.id)) state.characters.push(char);
-          });
+        normalizedCharacters.forEach(char => {
+          const clone = JSON.parse(JSON.stringify(char));
+          const existing = state.characters.find(c => c.id === char.id);
+          if (existing) {
+            Object.assign(existing, clone);
+          } else {
+            state.characters.push(clone);
+          }
+        });
+        if (!state.planMeta || typeof state.planMeta !== 'object') {
+          state.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
         }
         if (!state.planMeta || typeof state.planMeta !== 'object') {
           state.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
@@ -1895,7 +2019,7 @@ textarea.prompt-preview {
         console.error(err);
         showToast('Cover generation failed: ' + err.message);
       }
-    } else if (model === 'gemini') {
+    } else if (provider === 'gemini') {
       if (!state.keys.gemini) {
         showToast('Add Gemini key first.');
         return;
@@ -1918,6 +2042,8 @@ textarea.prompt-preview {
         console.error(err);
         showToast('Gemini cover failed: ' + err.message);
       }
+    } else {
+      showToast('Select an image generation provider.');
     }
   }
   function renderCoverPanel() {
@@ -1958,6 +2084,12 @@ textarea.prompt-preview {
     panel.appendChild(resetPromptBtn);
     const select = document.createElement('select');
     select.innerHTML = '<option value="openrouter">OpenRouter Image Model</option><option value="gemini">Google Gemini</option>';
+    select.value = state.cover.provider || 'openrouter';
+    select.onchange = () => {
+      state.cover.provider = select.value;
+      scheduleAutosave();
+      imageModelSelect.disabled = select.value !== 'openrouter';
+    };
     panel.appendChild(labelWrap('Cover model route', select));
     const imageModelSelect = document.createElement('select');
     imageModelSelect.innerHTML = '<option value="">Select image model</option>';
@@ -1969,6 +2101,7 @@ textarea.prompt-preview {
     });
     imageModelSelect.value = state.config.image_model || '';
     imageModelSelect.onchange = () => { state.config.image_model = imageModelSelect.value; scheduleAutosave(); };
+    imageModelSelect.disabled = select.value !== 'openrouter';
     panel.appendChild(labelWrap('OpenRouter image model', imageModelSelect));
     const genBtn = document.createElement('button');
     genBtn.textContent = 'Generate Cover';
@@ -2138,7 +2271,8 @@ textarea.prompt-preview {
         { key: 'plan', label: 'Story plan system prompt' },
         { key: 'characters', label: 'Character notes system prompt' },
         { key: 'draft', label: 'Chapter drafting system prompt' },
-        { key: 'continuity', label: 'Continuity check system prompt' }
+        { key: 'continuity', label: 'Continuity check system prompt' },
+        { key: 'continuityFix', label: 'Continuity auto-fix system prompt' }
       ];
       promptConfig.forEach(({ key, label }) => {
         const area = createTextarea(state.prompts?.[key]?.system || defaultPrompts[key].system, { spellcheck: false });
