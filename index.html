@@ -103,9 +103,26 @@ input[type="text"], input[type="number"], textarea, select {
   border: 1px solid rgba(0,0,0,0.1);
   background: rgba(255,255,255,0.9);
   font-size: 0.95rem;
-  color: inherit;
+  color: var(--fg);
   box-sizing: border-box;
   margin-bottom: 0.9rem;
+}
+input[type="text"]::placeholder,
+input[type="number"]::placeholder,
+textarea::placeholder {
+  color: rgba(0,0,0,0.45);
+}
+@media (prefers-color-scheme: dark) {
+  input[type="text"], input[type="number"], textarea, select {
+    background: var(--card-dark);
+    border-color: rgba(255,255,255,0.18);
+    color: var(--fg-dark);
+  }
+  input[type="text"]::placeholder,
+  input[type="number"]::placeholder,
+  textarea::placeholder {
+    color: rgba(255,255,255,0.65);
+  }
 }
 textarea {
   min-height: 140px;
@@ -199,6 +216,61 @@ textarea.small {
   padding: 0.4rem 0.8rem;
   border-radius: 6px;
 }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,17,23,0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 1000;
+}
+.modal-card {
+  background: rgba(255,255,255,0.96);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15,20,30,0.25);
+  max-width: 640px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+.modal-card h3 {
+  margin-top: 0;
+}
+.modal-card textarea {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  min-height: 240px;
+  resize: vertical;
+}
+.modal-card .error-text {
+  color: #c62828;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+.modal-card details {
+  margin-top: 1rem;
+}
+.modal-card details pre {
+  background: rgba(0,0,0,0.06);
+  padding: 0.75rem;
+  border-radius: 8px;
+  overflow: auto;
+}
+@media (prefers-color-scheme: dark) {
+  .modal-card {
+    background: rgba(28,32,40,0.95);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+  }
+  .modal-card details pre {
+    background: rgba(255,255,255,0.08);
+  }
+  .modal-card .error-text {
+    color: #ff8a80;
+  }
+}
 .badge {
   display: inline-flex;
   align-items: center;
@@ -270,6 +342,26 @@ pre.prompt-preview {
 <div id="toast" class="toast" style="display:none;"></div>
 <script>
 (() => {
+  const defaultPrompts = {
+    idea: {
+      system: 'You are a creative writing development assistant who expands short novel ideas into detailed notes.'
+    },
+    bible: {
+      system: 'You produce concise world bibles in JSON. Keep timeline ordered and respect any banned elements.'
+    },
+    plan: {
+      system: 'You are a meticulous story architect. Produce structured JSON chapter plans and optional character sheets. Ensure consistency with the provided bible and banned items.'
+    },
+    characters: {
+      system: 'Create detailed character bios. Return markdown bullet lists only.'
+    },
+    draft: {
+      system: 'You are a continuity-safe fiction writer. Obey the facts and constraints in JSON under canon_facts. Never revive dead characters unless the plan specifies it. Maintain POV, tense, and style guide. Respect target word count ±10%.'
+    },
+    continuity: {
+      system: 'You are a continuity validator. Inspect the provided chapter against canon facts and list violations as precise strings. Return JSON only.'
+    }
+  };
   const dom = {
     stepList: document.getElementById('step-list'),
     content: document.getElementById('content'),
@@ -298,6 +390,7 @@ pre.prompt-preview {
     meta: { title: 'Untitled Project', author: '', created: new Date().toISOString(), updated: new Date().toISOString(), version: 1 },
     config: { model: '', temperature: 0.7, top_p: 0.9, seed: undefined, chap_count: 12, chap_words: 2000, banned: [] },
     keys: { openrouter: '', gemini: '' },
+    prompts: JSON.parse(JSON.stringify(defaultPrompts)),
     idea: '',
     expansion: '',
     bible: { canon: '', timeline: [], locations: [], rules: [], tone_style_guide: [] },
@@ -308,6 +401,30 @@ pre.prompt-preview {
     continuityNotes: {},
     metrics: { tokens: 0, cost: 0 }
   });
+
+  function applyPromptDefaults(target) {
+    if (!target.prompts || typeof target.prompts !== 'object') {
+      target.prompts = JSON.parse(JSON.stringify(defaultPrompts));
+      return;
+    }
+    Object.keys(defaultPrompts).forEach(key => {
+      if (!target.prompts[key] || typeof target.prompts[key] !== 'object') {
+        target.prompts[key] = JSON.parse(JSON.stringify(defaultPrompts[key]));
+      } else {
+        Object.keys(defaultPrompts[key]).forEach(field => {
+          if (!target.prompts[key][field]) {
+            target.prompts[key][field] = defaultPrompts[key][field];
+          }
+        });
+      }
+    });
+  }
+
+  function hydrateState(raw) {
+    const merged = Object.assign(defaults(), raw || {});
+    applyPromptDefaults(merged);
+    return merged;
+  }
 
   let state = loadState();
   let activeStep = 0;
@@ -409,15 +526,97 @@ pre.prompt-preview {
     dom.toast.style.display = 'none';
   }
 
+  function showRecoveryEditor({ title, raw, schema, onSubmit }) {
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      if (el.parentElement) el.parentElement.removeChild(el);
+    });
+    document.body.style.overflow = '';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    const heading = document.createElement('h3');
+    heading.textContent = title || 'Review AI output';
+    const info = document.createElement('p');
+    info.className = 'small';
+    info.textContent = 'The AI response could not be parsed. Edit it below, then apply the fixed version.';
+    const textarea = createTextarea(raw || '', { spellcheck: false });
+    textarea.style.fontFamily = 'JetBrains Mono, Fira Code, monospace';
+    textarea.style.minHeight = '260px';
+    const errorText = document.createElement('div');
+    errorText.className = 'error-text';
+    errorText.style.display = 'none';
+    const buttonRow = document.createElement('div');
+    buttonRow.style.display = 'flex';
+    buttonRow.style.flexWrap = 'wrap';
+    buttonRow.style.gap = '0.5rem';
+    const applyBtn = document.createElement('button');
+    applyBtn.textContent = 'Apply corrected output';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'secondary';
+    cancelBtn.textContent = 'Cancel';
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'secondary';
+    copyBtn.textContent = 'Copy raw to clipboard';
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(textarea.value);
+        showToast('Copied to clipboard.');
+      } catch (err) {
+        console.error(err);
+        showToast('Unable to copy. Select text manually.');
+      }
+    };
+    applyBtn.onclick = () => {
+      try {
+        const parsed = JSON.parse(textarea.value || '{}');
+        if (schema) {
+          const validationError = validateJson(schema, parsed);
+          if (validationError) {
+            errorText.textContent = validationError;
+            errorText.style.display = 'block';
+            return;
+          }
+        }
+        onSubmit && onSubmit(parsed);
+        document.body.removeChild(overlay);
+        document.body.style.overflow = '';
+        showToast('Corrected output applied.', { duration: 4000 });
+      } catch (err) {
+        errorText.textContent = 'Invalid JSON: ' + err.message;
+        errorText.style.display = 'block';
+      }
+    };
+    cancelBtn.onclick = () => {
+      document.body.removeChild(overlay);
+      document.body.style.overflow = '';
+      hideToast();
+    };
+    buttonRow.append(applyBtn, cancelBtn, copyBtn);
+    card.append(heading, info, textarea, errorText, buttonRow);
+    if (schema) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'View expected schema';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(schema, null, 2);
+      details.append(summary, pre);
+      card.appendChild(details);
+    }
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+  }
+
   function loadState() {
     try {
       const raw = localStorage.getItem('novelgen.project');
-      if (!raw) return defaults();
+      if (!raw) return hydrateState();
       const parsed = JSON.parse(raw);
-      return Object.assign(defaults(), parsed);
+      return hydrateState(parsed);
     } catch (err) {
       console.error('Failed to load project', err);
-      return defaults();
+      return hydrateState();
     }
   }
 
@@ -742,17 +941,18 @@ pre.prompt-preview {
     return warning;
   }
 
-  async function generateWithStreaming({ introText, promptBuilder, onToken, structured }) {
+  async function generateWithStreaming({ introText, promptBuilder, onToken, structured, configOverrides = {} }) {
+    let full = '';
+    let recoveryPayload = null;
     try {
       showToast(introText, { duration: 2000 });
       const messages = promptBuilder();
-      let full = '';
       for await (const token of orChat({
-        model: state.config.model,
+        model: configOverrides.model || state.config.model,
         messages,
-        temperature: state.config.temperature,
-        top_p: state.config.top_p,
-        seed: state.config.seed,
+        temperature: configOverrides.temperature ?? state.config.temperature,
+        top_p: configOverrides.top_p ?? state.config.top_p,
+        seed: configOverrides.seed ?? state.config.seed,
         stream: !structured,
         structuredSchema: structured ? structured.schema : undefined
       })) {
@@ -760,15 +960,37 @@ pre.prompt-preview {
         onToken && onToken(full, token);
       }
       if (structured) {
-        const parsed = JSON.parse(full);
-        const err = validateJson(structured.schema, parsed);
-        if (err) throw new Error('Schema validation failed: ' + err);
+        let parsed;
+        try {
+          parsed = JSON.parse(full);
+        } catch (err) {
+          recoveryPayload = { raw: full, structured };
+          throw new Error('Invalid JSON: ' + err.message);
+        }
+        const validationError = validateJson(structured.schema, parsed);
+        if (validationError) {
+          recoveryPayload = { raw: full, structured };
+          throw new Error('Schema validation failed: ' + validationError);
+        }
         structured.onComplete(parsed);
       }
       hideToast();
     } catch (err) {
       console.error(err);
-      showToast('Generation failed: ' + err.message, { persistent: true, actionText: 'Close', onAction: hideToast });
+      if (recoveryPayload && recoveryPayload.raw) {
+        showToast('Generation failed: ' + err.message, { persistent: true, actionText: 'Dismiss', onAction: hideToast });
+        showRecoveryEditor({
+          title: recoveryPayload.structured?.name || 'Fix AI output',
+          raw: recoveryPayload.raw,
+          schema: recoveryPayload.structured?.schema,
+          onSubmit(parsed) {
+            recoveryPayload.structured?.onComplete(parsed);
+            hideToast();
+          }
+        });
+      } else {
+        showToast('Generation failed: ' + err.message, { persistent: true, actionText: 'Close', onAction: hideToast });
+      }
     }
   }
 
@@ -832,7 +1054,7 @@ pre.prompt-preview {
         const text = await file.text();
         try {
           const json = JSON.parse(text);
-          state = Object.assign(defaults(), json);
+          state = hydrateState(json);
           saveState();
           render();
         } catch (err) {
@@ -846,7 +1068,7 @@ pre.prompt-preview {
           return;
         }
         const json = JSON.parse(await projectFile.async('string'));
-        state = Object.assign(defaults(), json);
+        state = hydrateState(json);
         if (zip.file(/cover\.(png|jpg|jpeg)$/i)[0]) {
           const coverData = await zip.file(/cover\.(png|jpg|jpeg)$/i)[0].async('base64');
           state.cover = state.cover || {};
@@ -922,27 +1144,24 @@ pre.prompt-preview {
 
   async function continuityCheck(chapterDraft) {
     const canon = canonSummary();
-    const messages = [
-      { role: 'system', content: 'You are a continuity validator. Inspect the provided chapter against canon facts and list violations as precise strings. Return JSON only.' },
-      { role: 'user', content: JSON.stringify({ canon_facts: canon, chapter: chapterDraft.chapter, content: chapterDraft.content_md }) }
-    ];
-    let full = '';
-    for await (const token of orChat({
-      model: state.config.model,
-      messages,
-      temperature: 0,
-      top_p: 1,
-      stream: true,
-      structuredSchema: structuredSchemas.continuity
-    })) {
-      full += token;
-    }
-    const parsed = JSON.parse(full);
-    const err = validateJson(structuredSchemas.continuity, parsed);
-    if (err) throw new Error(err);
-    chapterDraft.violations = parsed.violations || [];
-    scheduleAutosave();
-    render();
+    await generateWithStreaming({
+      introText: 'Running continuity check...',
+      promptBuilder: () => [
+        { role: 'system', content: state.prompts?.continuity?.system || defaultPrompts.continuity.system },
+        { role: 'user', content: JSON.stringify({ canon_facts: canon, chapter: chapterDraft.chapter, content: chapterDraft.content_md }) }
+      ],
+      structured: {
+        schema: structuredSchemas.continuity,
+        name: 'Continuity report JSON',
+        onComplete(result) {
+          chapterDraft.violations = result.violations || [];
+          scheduleAutosave();
+          render();
+        }
+      },
+      configOverrides: { temperature: 0, top_p: 1 },
+      onToken() {}
+    });
   }
 
   function populateCharacterList(container) {
@@ -1088,7 +1307,7 @@ pre.prompt-preview {
       generateWithStreaming({
         introText: 'Generating chapter draft...',
         promptBuilder: () => [
-          { role: 'system', content: 'You are a continuity-safe fiction writer. Obey the facts and constraints in JSON under canon_facts. Never revive dead characters unless the plan specifies it. Maintain POV, tense, and style guide. Respect target word count ±10%.' },
+          { role: 'system', content: state.prompts?.draft?.system || defaultPrompts.draft.system },
           { role: 'user', content: promptPreviewForChapter(draft.chapter) }
         ],
         onToken(full) {
@@ -1129,7 +1348,7 @@ pre.prompt-preview {
     await generateWithStreaming({
       introText: 'Expanding idea...',
       promptBuilder: () => [
-        { role: 'system', content: 'You are a creative writing development assistant who expands short novel ideas into detailed notes.' },
+        { role: 'system', content: state.prompts?.idea?.system || defaultPrompts.idea.system },
         { role: 'user', content: JSON.stringify({ idea: state.idea, genre: state.meta.genre, themes: state.meta.themes }) }
       ],
       onToken(full) {
@@ -1143,9 +1362,9 @@ pre.prompt-preview {
   async function generateWorldBible() {
     await generateWithStreaming({
       introText: 'Generating world bible...',
-      structured: { schema: structuredSchemas.worldBible, onComplete(result) { state.bible = result.bible; scheduleAutosave(); render(); } },
+      structured: { schema: structuredSchemas.worldBible, name: 'World bible JSON', onComplete(result) { state.bible = result.bible; scheduleAutosave(); render(); } },
       promptBuilder: () => [
-        { role: 'system', content: 'You produce concise world bibles in JSON. Keep timeline ordered and respect any banned elements.' },
+        { role: 'system', content: state.prompts?.bible?.system || defaultPrompts.bible.system },
         { role: 'user', content: JSON.stringify({ idea: state.idea, expansion: state.expansion, banned: state.config.banned }) }
       ],
       onToken(full) {}
@@ -1164,9 +1383,9 @@ pre.prompt-preview {
         }
         scheduleAutosave();
         render();
-      } },
+      }, name: 'Story plan JSON' },
       promptBuilder: () => [
-        { role: 'system', content: 'You are a meticulous story architect. Produce structured JSON chapter plans and optional character sheets. Ensure consistency with the provided bible and banned items.' },
+        { role: 'system', content: state.prompts?.plan?.system || defaultPrompts.plan.system },
         { role: 'user', content: JSON.stringify({ bible: state.bible, idea: state.idea, expansion: state.expansion, chapter_count: state.config.chap_count, target_words: state.config.chap_words }) }
       ],
       onToken(){}
@@ -1177,7 +1396,7 @@ pre.prompt-preview {
     await generateWithStreaming({
       introText: 'Generating character sheets...',
       promptBuilder: () => [
-        { role: 'system', content: 'Create detailed character bios. Return markdown bullet lists only.' },
+        { role: 'system', content: state.prompts?.characters?.system || defaultPrompts.characters.system },
         { role: 'user', content: JSON.stringify({ bible: state.bible, plan: state.plan }) }
       ],
       onToken(full) {
@@ -1397,6 +1616,39 @@ pre.prompt-preview {
       if (!modelsCache.length && state.keys.openrouter) {
         fetchModels();
       }
+      const promptPanel = createSection('AI Prompt Customization');
+      const promptIntro = document.createElement('p');
+      promptIntro.className = 'small';
+      promptIntro.textContent = 'Adjust the system prompts sent to the AI for each step. Changes are saved per project.';
+      promptPanel.appendChild(promptIntro);
+      const promptConfig = [
+        { key: 'idea', label: 'Idea → Expansion system prompt' },
+        { key: 'bible', label: 'World bible system prompt' },
+        { key: 'plan', label: 'Story plan system prompt' },
+        { key: 'characters', label: 'Character notes system prompt' },
+        { key: 'draft', label: 'Chapter drafting system prompt' },
+        { key: 'continuity', label: 'Continuity check system prompt' }
+      ];
+      promptConfig.forEach(({ key, label }) => {
+        const area = createTextarea(state.prompts?.[key]?.system || defaultPrompts[key].system, { spellcheck: false });
+        area.style.fontFamily = 'JetBrains Mono, Fira Code, monospace';
+        area.style.minHeight = '100px';
+        area.addEventListener('input', () => {
+          state.prompts[key] = state.prompts[key] || {};
+          state.prompts[key].system = area.value;
+          scheduleAutosave();
+        });
+        promptPanel.appendChild(labelWrap(label, area));
+      });
+      const resetPromptsBtn = document.createElement('button');
+      resetPromptsBtn.className = 'secondary';
+      resetPromptsBtn.textContent = 'Reset prompts to defaults';
+      resetPromptsBtn.onclick = () => {
+        state.prompts = JSON.parse(JSON.stringify(defaultPrompts));
+        scheduleAutosave();
+        render();
+      };
+      promptPanel.appendChild(resetPromptsBtn);
     },
     function ideaStep(container) {
       const panel = createSection('Idea → Expansion');
