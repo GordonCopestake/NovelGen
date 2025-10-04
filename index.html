@@ -822,9 +822,45 @@ pre.prompt-preview {
       const text = await res.text();
       throw new Error(`OpenRouter error ${res.status}: ${text}`);
     }
+    let requestTokens = 0;
+    let requestCost = 0;
+    const headerEntries = {};
+    res.headers.forEach((value, key) => {
+      headerEntries[key.toLowerCase()] = value;
+    });
+    const parseNumber = value => {
+      if (value === undefined) return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    };
+    const tokenHeaderCandidates = ['x-request-tokens', 'x-request-total-tokens', 'x-usage-total-tokens'];
+    for (const key of tokenHeaderCandidates) {
+      const parsed = parseNumber(headerEntries[key]);
+      if (parsed != null) {
+        requestTokens = parsed;
+        break;
+      }
+    }
+    const costHeaderCandidates = ['x-request-cost', 'x-request-total-cost', 'x-usage-total-cost'];
+    for (const key of costHeaderCandidates) {
+      const parsed = parseNumber(headerEntries[key]);
+      if (parsed != null) {
+        requestCost = parsed;
+        break;
+      }
+    }
     if (!stream) {
       const json = await res.json();
-      yield json.choices?.[0]?.message?.content || '';
+      if (json?.usage) {
+        const usage = json.usage;
+        const totalTokens = parseNumber(usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)));
+        const totalCost = parseNumber(usage.total_cost ?? usage.cost ?? 0);
+        if (totalTokens != null) requestTokens = totalTokens;
+        if (totalCost != null) requestCost = totalCost;
+      }
+      const content = json.choices?.[0]?.message?.content || '';
+      updateMetrics(requestTokens, requestCost);
+      yield content;
       return;
     }
     const reader = res.body.getReader();
@@ -842,6 +878,13 @@ pre.prompt-preview {
         if (payload === '[DONE]') continue;
         try {
           const json = JSON.parse(payload);
+          if (json?.usage) {
+            const usage = json.usage;
+            const totalTokens = parseNumber(usage.total_tokens ?? ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)));
+            const totalCost = parseNumber(usage.total_cost ?? usage.cost ?? 0);
+            if (totalTokens != null && !requestTokens) requestTokens = totalTokens;
+            if (totalCost != null && !requestCost) requestCost = totalCost;
+          }
           const token = json.choices?.[0]?.delta?.content || '';
           if (token) yield token;
         } catch (err) {
@@ -849,6 +892,9 @@ pre.prompt-preview {
         }
       }
       buffer = parts[parts.length - 1];
+    }
+    if (requestTokens || requestCost) {
+      updateMetrics(requestTokens, requestCost);
     }
   }
   function validateJson(schema, data) {
