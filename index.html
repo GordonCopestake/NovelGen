@@ -343,13 +343,24 @@ button.tab-button.active {
     background: linear-gradient(180deg, transparent, rgba(18,20,26,0.95));
   }
 }
-pre.prompt-preview {
-  max-height: 260px;
+.prompt-preview {
   overflow: auto;
   background: rgba(0,0,0,0.08);
   padding: 0.75rem;
   border-radius: 8px;
   font-size: 0.8rem;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+pre.prompt-preview {
+  max-height: 260px;
+}
+
+textarea.prompt-preview {
+  min-height: 220px;
+  resize: vertical;
+  white-space: pre;
+  max-height: none;
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -454,6 +465,19 @@ pre.prompt-preview {
   function hydrateState(raw) {
     const merged = Object.assign(defaults(), raw || {});
     applyPromptDefaults(merged);
+    merged.drafts = (merged.drafts || []).map(draft => {
+      if (!draft || typeof draft !== 'object') {
+        return { chapter: null, content_md: '', notes: '', violations: [], prompt_override: '' };
+      }
+      const normalized = Object.assign({ content_md: '', notes: '', violations: [], prompt_override: '' }, draft);
+      if (!Array.isArray(normalized.violations)) {
+        normalized.violations = [];
+      }
+      if (typeof normalized.prompt_override !== 'string') {
+        normalized.prompt_override = '';
+      }
+      return normalized;
+    });
     return merged;
   }
 
@@ -997,6 +1021,11 @@ pre.prompt-preview {
   }
 
   function promptPreviewForChapter(chapter) {
+    const draft = (state.drafts || []).find(d => d.chapter === chapter);
+    const override = typeof draft?.prompt_override === 'string' ? draft.prompt_override : '';
+    if (override && override.trim()) {
+      return override;
+    }
     const canon = canonSummary();
     const plan = state.plan.find(p => p.chapter === chapter) || {};
     const request = {
@@ -1012,10 +1041,22 @@ pre.prompt-preview {
   }
 
   function refreshDraftPromptPreviews() {
-    document.querySelectorAll('pre.prompt-preview[data-chapter]').forEach(pre => {
-      const chapter = parseInt(pre.dataset.chapter || '', 10);
-      if (!Number.isNaN(chapter)) {
-        pre.textContent = promptPreviewForChapter(chapter);
+    document.querySelectorAll('.prompt-preview[data-chapter]').forEach(element => {
+      const chapter = parseInt(element.dataset.chapter || '', 10);
+      if (Number.isNaN(chapter)) return;
+      const content = promptPreviewForChapter(chapter);
+      if (element.tagName === 'TEXTAREA') {
+        const caret = element.selectionStart;
+        const anchor = element.selectionEnd;
+        const scroll = element.scrollTop;
+        element.value = content;
+        if (document.activeElement === element) {
+          element.selectionStart = caret;
+          element.selectionEnd = anchor;
+        }
+        element.scrollTop = scroll;
+      } else {
+        element.textContent = content;
       }
     });
   }
@@ -1445,11 +1486,28 @@ pre.prompt-preview {
       warning.innerHTML = `<strong>Continuity violations:</strong><ul>${draft.violations.map(v => `<li>${v}</li>`).join('')}</ul>`;
       container.appendChild(warning);
     }
-    const promptPre = document.createElement('pre');
-    promptPre.className = 'prompt-preview';
-    promptPre.dataset.chapter = String(draft.chapter);
-    promptPre.textContent = promptPreviewForChapter(draft.chapter);
-    container.appendChild(promptPre);
+    const promptInfo = document.createElement('p');
+    promptInfo.className = 'small';
+    promptInfo.textContent = 'Edit the JSON request that will be sent to the drafting agent. Leave blank to regenerate from the current outline.';
+    container.appendChild(promptInfo);
+    const promptArea = createTextarea(promptPreviewForChapter(draft.chapter), { spellcheck: false });
+    promptArea.classList.add('prompt-preview');
+    promptArea.dataset.chapter = String(draft.chapter);
+    promptArea.addEventListener('input', () => {
+      const value = promptArea.value;
+      draft.prompt_override = value.trim() ? value : '';
+      scheduleAutosave();
+    });
+    container.appendChild(labelWrap('Chapter drafting JSON prompt', promptArea));
+    const resetPromptBtn = document.createElement('button');
+    resetPromptBtn.className = 'secondary';
+    resetPromptBtn.textContent = 'Reset prompt to outline';
+    resetPromptBtn.onclick = () => {
+      draft.prompt_override = '';
+      scheduleAutosave();
+      refreshDraftPromptPreviews();
+      showToast('Chapter prompt reset to match the outline.');
+    };
     const genBtn = document.createElement('button');
     genBtn.textContent = 'Generate Draft';
     genBtn.onclick = () => {
@@ -1470,7 +1528,7 @@ pre.prompt-preview {
     checkBtn.className = 'secondary';
     checkBtn.textContent = 'Continuity Check';
     checkBtn.onclick = () => continuityCheck(draft);
-    container.append(genBtn, checkBtn);
+    container.append(resetPromptBtn, genBtn, checkBtn);
   }
 
   function renderDraftsPanel() {
@@ -1485,7 +1543,7 @@ pre.prompt-preview {
     }
     plans.forEach(plan => {
       if (!state.drafts.find(d => d.chapter === plan.chapter)) {
-        state.drafts.push({ chapter: plan.chapter, content_md: '', notes: '', violations: [] });
+        state.drafts.push({ chapter: plan.chapter, content_md: '', notes: '', violations: [], prompt_override: '' });
       }
     });
     if (!activeDraftTab || !plans.some(plan => plan.chapter === activeDraftTab)) {
