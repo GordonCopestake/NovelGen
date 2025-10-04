@@ -443,7 +443,7 @@ textarea.prompt-preview {
     plan: [],
     planMeta: { arc_summary: '', act_breakdown: [], custom_notes: '' },
     drafts: [],
-    cover: { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' },
+    cover: { prompt: '', dataUrl: '', attribution: '', autoSeed: '' },
     continuityNotes: {},
     metrics: { tokens: 0, cost: 0 }
   });
@@ -531,12 +531,9 @@ textarea.prompt-preview {
     if (typeof merged.planMeta.arc_summary !== 'string') merged.planMeta.arc_summary = '';
     if (!Array.isArray(merged.planMeta.act_breakdown)) merged.planMeta.act_breakdown = [];
     if (typeof merged.planMeta.custom_notes !== 'string') merged.planMeta.custom_notes = '';
-    merged.cover = merged.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+    merged.cover = merged.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
     if (typeof merged.cover.prompt !== 'string') merged.cover.prompt = '';
     if (typeof merged.cover.autoSeed !== 'string') merged.cover.autoSeed = '';
-    if (typeof merged.cover.provider !== 'string' || !merged.cover.provider) merged.cover.provider = 'openrouter';
-    if (!merged.config) merged.config = {};
-    if (typeof merged.config.image_model !== 'string') merged.config.image_model = '';
     return merged;
   }
 
@@ -1122,107 +1119,59 @@ textarea.prompt-preview {
   }
 
   function replaceNameInText(text, oldName, newName) {
-    if (!text || typeof text !== 'string' || !oldName) return text;
+    if (!text || typeof text !== 'string') return text;
     const pattern = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, 'g');
     return text.replace(pattern, newName);
   }
 
-  function stripNameIdPrefixes(text, name) {
-    if (!text || typeof text !== 'string') return text;
-    if (name) {
-      const pattern = new RegExp(`NameID\\s*[:#-]?\\s*${escapeRegExp(name)}`, 'gi');
-      return text.replace(pattern, name);
-    }
-    return text.replace(/NameID\\s*[:#-]?\\s*/gi, '');
-  }
-
   function applyCharacterRename(character, oldName, newName) {
-    const baseOld = typeof oldName === 'string' ? oldName.trim() : '';
-    const baseNew = typeof newName === 'string' ? newName.trim() : '';
-    const normalizedOld = sanitizeCharacterName(baseOld) || sanitizeCharacterName(character?.name || '');
-    const normalizedNew = sanitizeCharacterName(baseNew);
-    const finalNewName = normalizedNew || baseNew;
-    if (!finalNewName && finalNewName !== '') return;
-    const searchNames = new Set(
-      [baseOld, normalizedOld]
-        .map(name => typeof name === 'string' ? name.trim() : '')
-        .filter(Boolean)
-    );
-    if (!searchNames.size && character?.name) {
-      const resolved = sanitizeCharacterName(character.name);
-      if (resolved) searchNames.add(resolved);
-    }
+    if (!oldName || !newName || oldName === newName) return;
     const charId = character?.id;
-    const matchesKnownName = value => {
-      if (!value) return false;
-      const trimmed = String(value).trim();
-      if (!trimmed) return false;
-      if (searchNames.has(trimmed)) return true;
-      const sanitizedVariant = sanitizeCharacterName(trimmed);
-      return sanitizedVariant ? searchNames.has(sanitizedVariant) : false;
-    };
-    const applyReplacement = value => {
-      if (!value || typeof value !== 'string' || !searchNames.size) return value;
-      let updated = value;
-      let changed = false;
-      searchNames.forEach(nameVariant => {
-        const next = replaceNameInText(updated, nameVariant, finalNewName);
-        if (next !== updated) {
-          changed = true;
-        }
-        updated = next;
-      });
-      if (changed) {
-        updated = stripNameIdPrefixes(updated, finalNewName);
-      }
-      return updated;
-    };
     if (Array.isArray(state.planCharacters)) {
       state.planCharacters = state.planCharacters.map(planChar => {
         if (!planChar) return planChar;
-        if ((planChar.id && planChar.id === charId) || matchesKnownName(planChar.name)) {
-          return Object.assign({}, planChar, { name: finalNewName });
+        if (planChar.id && planChar.id === charId) {
+          return Object.assign({}, planChar, { name: newName });
+        }
+        if (!planChar.id && planChar.name === oldName) {
+          return Object.assign({}, planChar, { name: newName });
         }
         return planChar;
       });
     }
     (state.characters || []).forEach(char => {
-      if (char === character || (char.id && char.id === charId) || matchesKnownName(char.name)) {
-        char.name = finalNewName;
+      if (char === character || (char.id && char.id === charId)) {
+        char.name = newName;
       }
     });
     (state.plan || []).forEach(plan => {
       if (!plan) return;
-      plan.title = applyReplacement(plan.title);
-      plan.synopsis = applyReplacement(plan.synopsis);
+      plan.title = replaceNameInText(plan.title, oldName, newName);
+      plan.synopsis = replaceNameInText(plan.synopsis, oldName, newName);
       if (Array.isArray(plan.beats)) {
-        plan.beats = plan.beats.map(line => applyReplacement(line));
+        plan.beats = plan.beats.map(line => replaceNameInText(line, oldName, newName));
       }
       if (Array.isArray(plan.key_events)) {
-        plan.key_events = plan.key_events.map(line => applyReplacement(line));
+        plan.key_events = plan.key_events.map(line => replaceNameInText(line, oldName, newName));
       }
-      plan.pov = applyReplacement(plan.pov);
     });
     (state.drafts || []).forEach(draft => {
       if (!draft) return;
-      draft.content_md = applyReplacement(draft.content_md);
-      draft.notes = applyReplacement(draft.notes);
+      draft.content_md = replaceNameInText(draft.content_md, oldName, newName);
+      draft.notes = replaceNameInText(draft.notes, oldName, newName);
       if (typeof draft.prompt_override === 'string' && draft.prompt_override) {
-        draft.prompt_override = applyReplacement(draft.prompt_override);
+        draft.prompt_override = replaceNameInText(draft.prompt_override, oldName, newName);
       }
     });
     if (state.planMeta) {
-      state.planMeta.arc_summary = applyReplacement(state.planMeta.arc_summary);
+      state.planMeta.arc_summary = replaceNameInText(state.planMeta.arc_summary, oldName, newName);
       if (Array.isArray(state.planMeta.act_breakdown)) {
-        state.planMeta.act_breakdown = state.planMeta.act_breakdown.map(item => applyReplacement(item));
+        state.planMeta.act_breakdown = state.planMeta.act_breakdown.map(item => replaceNameInText(item, oldName, newName));
       }
-      state.planMeta.custom_notes = applyReplacement(state.planMeta.custom_notes);
+      state.planMeta.custom_notes = replaceNameInText(state.planMeta.custom_notes, oldName, newName);
     }
     if (state.cover?.prompt) {
-      state.cover.prompt = applyReplacement(state.cover.prompt);
-    }
-    if (state.cover?.autoSeed) {
-      state.cover.autoSeed = applyReplacement(state.cover.autoSeed);
+      state.cover.prompt = replaceNameInText(state.cover.prompt, oldName, newName);
     }
     refreshDraftPromptPreviews();
   }
@@ -1246,7 +1195,7 @@ textarea.prompt-preview {
   function canonSummary() {
     const overview = projectOverview();
     const bible = state.bible || {};
-    const charSummary = [];
+    const charSummary = state.characters.map(c => ({ id: c.id, name: c.name, alive: c.status?.alive !== false, last_seen_chapter: c.status?.last_seen_chapter || null })).slice(0, 30);
     const hard = [];
     state.characters.forEach(c => {
       const resolvedName = sanitizeCharacterName(c?.name || '') || sanitizeCharacterName(c?.id || '');
@@ -1274,7 +1223,7 @@ textarea.prompt-preview {
         tone_style_guide: Array.isArray(bible.tone_style_guide) ? bible.tone_style_guide : []
       },
       global_tone_style: bible.tone_style_guide || [],
-      characters_index: charSummary.slice(0, 30),
+      characters_index: charSummary,
       story_arc: state.planMeta?.arc_summary || '',
       act_breakdown: Array.isArray(state.planMeta?.act_breakdown) ? state.planMeta.act_breakdown : [],
       additional_outline_notes: state.planMeta?.custom_notes || '',
@@ -1496,7 +1445,7 @@ textarea.prompt-preview {
         state = hydrateState(json);
         if (zip.file(/cover\.(png|jpg|jpeg)$/i)[0]) {
           const coverData = await zip.file(/cover\.(png|jpg|jpeg)$/i)[0].async('base64');
-          state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+          state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
           state.cover.dataUrl = 'data:image/png;base64,' + coverData;
         }
         saveState();
@@ -1717,16 +1666,12 @@ textarea.prompt-preview {
     let previousName = character.name;
     const nameInput = createInput('text', character.name);
     nameInput.oninput = () => {
-      const rawName = nameInput.value;
-      const sanitized = sanitizeCharacterName(rawName);
-      if (previousName !== sanitized) {
-        applyCharacterRename(character, previousName, sanitized);
-        previousName = sanitized;
+      const newName = nameInput.value;
+      if (previousName && previousName !== newName) {
+        applyCharacterRename(character, previousName, newName);
+        previousName = newName;
       }
-      if (rawName !== sanitized) {
-        nameInput.value = sanitized;
-      }
-      character.name = sanitized;
+      character.name = newName;
       markDirty();
     };
     const roleInput = createInput('text', character.role);
@@ -1969,10 +1914,7 @@ textarea.prompt-preview {
           normalized.chapter = Number.isFinite(chapterNumber) ? chapterNumber : index + 1;
           return normalized;
         });
-        const normalizedCharacters = Array.isArray(result.characters)
-          ? result.characters.map(normalizeCharacterRecord).filter(Boolean)
-          : [];
-        state.planCharacters = normalizedCharacters.map(char => JSON.parse(JSON.stringify(char)));
+        state.planCharacters = JSON.parse(JSON.stringify(result.characters || []));
         activeDraftTab = state.plan.length ? state.plan[0].chapter : null;
         state.characters = state.characters || [];
         normalizedCharacters.forEach(char => {
@@ -1984,6 +1926,9 @@ textarea.prompt-preview {
             state.characters.push(clone);
           }
         });
+        if (!state.planMeta || typeof state.planMeta !== 'object') {
+          state.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
+        }
         if (!state.planMeta || typeof state.planMeta !== 'object') {
           state.planMeta = { arc_summary: '', act_breakdown: [], custom_notes: '' };
         }
@@ -2042,11 +1987,9 @@ textarea.prompt-preview {
     render();
   }
 
-  async function generateCover(provider = state.cover?.provider || 'openrouter') {
-    state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
-    state.cover.provider = provider;
+  async function generateCover(model) {
     const resolvedPrompt = (state.cover?.prompt && state.cover.prompt.trim()) || composeCoverPrompt();
-    if (provider === 'openrouter') {
+    if (model === 'openrouter') {
       if (!state.config.image_model) {
         showToast('Select an image-capable model.');
         return;
@@ -2068,7 +2011,7 @@ textarea.prompt-preview {
         const data = await res.json();
         const image = data.data?.[0]?.b64_json;
         if (!image) throw new Error('No image returned');
-        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = 'data:image/png;base64,' + image;
         scheduleAutosave();
         render();
@@ -2091,7 +2034,7 @@ textarea.prompt-preview {
         const data = await res.json();
         const image = data?.generatedImages?.[0]?.bytesBase64;
         if (!image) throw new Error('No image returned');
-        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = 'data:image/png;base64,' + image;
         scheduleAutosave();
         render();
@@ -2107,11 +2050,7 @@ textarea.prompt-preview {
     const panel = document.createElement('div');
     panel.className = 'panel';
     panel.innerHTML = '<h2>Cover Generator</h2>';
-    state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
-    if (!state.cover.provider) state.cover.provider = 'openrouter';
-    if (!imageModelsCache.length && state.keys.openrouter) {
-      fetchModels();
-    }
+    state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
     const autoPrompt = composeCoverPrompt();
     const currentPrompt = (state.cover.prompt || '').trim();
     const autoSeed = state.cover.autoSeed || '';
@@ -2125,7 +2064,7 @@ textarea.prompt-preview {
     const promptValue = state.cover.prompt || autoPrompt || '';
     const prompt = createTextarea(promptValue, { placeholder: 'Cover prompt' });
     prompt.addEventListener('input', () => {
-      state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+      state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
       state.cover.prompt = prompt.value;
       state.cover.autoSeed = '';
       scheduleAutosave();
@@ -2175,7 +2114,7 @@ textarea.prompt-preview {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '', provider: 'openrouter' };
+        state.cover = state.cover || { prompt: '', dataUrl: '', attribution: '', autoSeed: '' };
         state.cover.dataUrl = reader.result;
         scheduleAutosave();
         render();
