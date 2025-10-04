@@ -965,6 +965,22 @@ pre.prompt-preview {
     return JSON.stringify(request, null, 2);
   }
 
+  function refreshDraftPromptPreviews() {
+    document.querySelectorAll('pre.prompt-preview[data-chapter]').forEach(pre => {
+      const chapter = parseInt(pre.dataset.chapter || '', 10);
+      if (!Number.isNaN(chapter)) {
+        pre.textContent = promptPreviewForChapter(chapter);
+      }
+    });
+  }
+
+  function scrollTextareaToBottom(textarea) {
+    if (!textarea) return;
+    requestAnimationFrame(() => {
+      textarea.scrollTop = textarea.scrollHeight;
+    });
+  }
+
   function markdownToXhtml(md) {
     const html = md
       .replace(/&/g, '&amp;')
@@ -1268,28 +1284,42 @@ pre.prompt-preview {
     modal.style.maxHeight = '80vh';
     modal.style.overflowY = 'auto';
     modal.innerHTML = `<h2>Edit ${character.name}</h2>`;
+    character.status = character.status || {};
+    character.continuity_flags = character.continuity_flags || {};
+    const markDirty = () => { scheduleAutosave(); refreshDraftPromptPreviews(); };
     const nameInput = createInput('text', character.name);
-    nameInput.oninput = () => { character.name = nameInput.value; scheduleAutosave(); };
+    nameInput.oninput = () => { character.name = nameInput.value; markDirty(); };
     const roleInput = createInput('text', character.role);
-    roleInput.oninput = () => { character.role = roleInput.value; scheduleAutosave(); };
+    roleInput.oninput = () => { character.role = roleInput.value; markDirty(); };
     const bioArea = createTextarea(character.bio);
-    bioArea.oninput = () => { character.bio = bioArea.value; scheduleAutosave(); };
+    bioArea.oninput = () => { character.bio = bioArea.value; markDirty(); };
     const traitsInput = createInput('text', (character.traits || []).join(', '));
-    traitsInput.oninput = () => { character.traits = traitsInput.value.split(',').map(s => s.trim()).filter(Boolean); scheduleAutosave(); };
+    traitsInput.oninput = () => {
+      character.traits = traitsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+      markDirty();
+    };
     const arcsInput = createInput('text', (character.arcs || []).join(', '));
-    arcsInput.oninput = () => { character.arcs = arcsInput.value.split(',').map(s => s.trim()).filter(Boolean); scheduleAutosave(); };
+    arcsInput.oninput = () => {
+      character.arcs = arcsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+      markDirty();
+    };
     const aliveCheckbox = document.createElement('input');
     aliveCheckbox.type = 'checkbox';
     aliveCheckbox.checked = character.status?.alive !== false;
-    aliveCheckbox.onchange = () => { character.status.alive = aliveCheckbox.checked; scheduleAutosave(); };
+    aliveCheckbox.onchange = () => { character.status.alive = aliveCheckbox.checked; markDirty(); };
     const whereInput = createInput('text', character.status?.whereabouts || '');
-    whereInput.oninput = () => { character.status.whereabouts = whereInput.value; scheduleAutosave(); };
+    whereInput.oninput = () => { character.status.whereabouts = whereInput.value; markDirty(); };
     const lastSeenInput = createInput('number', character.status?.last_seen_chapter || '');
-    lastSeenInput.oninput = () => { character.status.last_seen_chapter = parseInt(lastSeenInput.value || '0', 10); scheduleAutosave(); };
+    lastSeenInput.oninput = () => {
+      const parsed = parseInt(lastSeenInput.value || '0', 10);
+      character.status.last_seen_chapter = Number.isNaN(parsed) ? undefined : parsed;
+      markDirty();
+    };
     const flagsArea = createTextarea(JSON.stringify(character.continuity_flags || {}, null, 2));
     flagsArea.oninput = () => {
       try {
         character.continuity_flags = JSON.parse(flagsArea.value || '{}');
+        markDirty();
       } catch (err) {
       }
     };
@@ -1345,6 +1375,7 @@ pre.prompt-preview {
     }
     const promptPre = document.createElement('pre');
     promptPre.className = 'prompt-preview';
+    promptPre.dataset.chapter = String(draft.chapter);
     promptPre.textContent = promptPreviewForChapter(draft.chapter);
     container.appendChild(promptPre);
     const genBtn = document.createElement('button');
@@ -1359,6 +1390,7 @@ pre.prompt-preview {
         onToken(full) {
           draft.content_md = full;
           area.value = full;
+          scrollTextareaToBottom(area);
         }
       });
     };
@@ -1400,6 +1432,7 @@ pre.prompt-preview {
       onToken(full) {
         state.expansion = full;
         expansionArea.value = full;
+        scrollTextareaToBottom(expansionArea);
       }
     });
     scheduleAutosave();
