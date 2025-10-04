@@ -293,6 +293,36 @@ textarea.small {
   padding: 1rem;
   margin-bottom: 1rem;
 }
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+button.tab-button {
+  background: rgba(124,92,255,0.12);
+  color: inherit;
+  box-shadow: none;
+  margin-top: 0;
+  margin-right: 0;
+}
+button.tab-button.active {
+  background: var(--accent);
+  color: #fff;
+}
+.tab-panel {
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 #cover-canvas {
   border: 1px solid rgba(0,0,0,0.1);
   border-radius: 8px;
@@ -395,6 +425,7 @@ pre.prompt-preview {
     expansion: '',
     bible: { canon: '', timeline: [], locations: [], rules: [], tone_style_guide: [] },
     characters: [],
+    planCharacters: [],
     plan: [],
     drafts: [],
     cover: { prompt: '', dataUrl: '', attribution: '' },
@@ -428,6 +459,7 @@ pre.prompt-preview {
 
   let state = loadState();
   let activeStep = 0;
+  let activeDraftTab = null;
   let modelsCache = [];
   let imageModelsCache = [];
   let autosaveTimer = null;
@@ -1242,7 +1274,14 @@ pre.prompt-preview {
 
   function populateCharacterList(container) {
     container.innerHTML = '';
-    state.characters.forEach(char => {
+    const characters = state.characters || [];
+    if (!characters.length) {
+      const empty = document.createElement('p');
+      empty.className = 'small';
+      empty.textContent = 'No characters yet. Generate an outline or add them manually.';
+      container.appendChild(empty);
+    }
+    characters.forEach(char => {
       const card = document.createElement('div');
       card.className = 'chapter-card';
       card.innerHTML = `
@@ -1263,7 +1302,25 @@ pre.prompt-preview {
       editBtn.className = 'secondary';
       editBtn.textContent = 'Edit';
       editBtn.onclick = () => openCharacterEditor(char);
-      card.appendChild(editBtn);
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.onclick = () => {
+        if (!confirm(`Delete ${char.name}? This cannot be undone.`)) return;
+        state.characters = (state.characters || []).filter(c => c.id !== char.id);
+        state.planCharacters = (state.planCharacters || []).filter(c => c.id !== char.id);
+        scheduleAutosave();
+        refreshDraftPromptPreviews();
+        document.querySelectorAll(`.panel[data-character-id="${char.id}"]`).forEach(node => {
+          if (node.parentElement) node.parentElement.removeChild(node);
+        });
+        showToast(`${char.name} deleted.`);
+        render();
+      };
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      actions.append(editBtn, deleteBtn);
+      card.appendChild(actions);
       container.appendChild(card);
     });
     const addBtn = document.createElement('button');
@@ -1298,6 +1355,7 @@ pre.prompt-preview {
     modal.style.maxHeight = '80vh';
     modal.style.overflowY = 'auto';
     modal.innerHTML = `<h2>Edit ${character.name}</h2>`;
+    modal.dataset.characterId = character.id;
     character.status = character.status || {};
     character.continuity_flags = character.continuity_flags || {};
     const markDirty = () => { scheduleAutosave(); refreshDraftPromptPreviews(); };
@@ -1417,18 +1475,45 @@ pre.prompt-preview {
 
   function renderDraftsPanel() {
     const container = document.createElement('div');
-    (state.plan || []).forEach(plan => {
-      let draft = state.drafts.find(d => d.chapter === plan.chapter);
-      if (!draft) {
-        draft = { chapter: plan.chapter, content_md: '', notes: '', violations: [] };
-        state.drafts.push(draft);
+    const plans = (state.plan || []).slice().sort((a, b) => a.chapter - b.chapter);
+    if (!plans.length) {
+      const empty = document.createElement('p');
+      empty.className = 'small';
+      empty.textContent = 'Generate an outline to start drafting chapters.';
+      container.appendChild(empty);
+      return container;
+    }
+    plans.forEach(plan => {
+      if (!state.drafts.find(d => d.chapter === plan.chapter)) {
+        state.drafts.push({ chapter: plan.chapter, content_md: '', notes: '', violations: [] });
       }
+    });
+    if (!activeDraftTab || !plans.some(plan => plan.chapter === activeDraftTab)) {
+      activeDraftTab = plans[0].chapter;
+    }
+    const tabBar = document.createElement('div');
+    tabBar.className = 'tab-bar';
+    plans.forEach(plan => {
+      const tab = document.createElement('button');
+      tab.className = 'tab-button' + (plan.chapter === activeDraftTab ? ' active' : '');
+      tab.textContent = `Chapter ${plan.chapter}`;
+      tab.title = plan.title || '';
+      tab.onclick = () => {
+        activeDraftTab = plan.chapter;
+        render();
+      };
+      tabBar.appendChild(tab);
+    });
+    container.appendChild(tabBar);
+    const activePlan = plans.find(plan => plan.chapter === activeDraftTab);
+    if (activePlan) {
+      const draft = state.drafts.find(d => d.chapter === activePlan.chapter);
       const panel = document.createElement('div');
-      panel.className = 'panel';
-      panel.innerHTML = `<h3>Chapter ${plan.chapter}: ${plan.title}</h3><p class="small">${plan.synopsis}</p>`;
+      panel.className = 'panel tab-panel';
+      panel.innerHTML = `<h3>Chapter ${activePlan.chapter}: ${activePlan.title}</h3><p class="small">${activePlan.synopsis}</p>`;
       renderDraftEditor(draft, panel);
       container.appendChild(panel);
-    });
+    }
     return container;
   }
 
@@ -1468,7 +1553,10 @@ pre.prompt-preview {
     await generateWithStreaming({
       introText: 'Generating story plan...',
       structured: { schema: structuredSchemas.plan, onComplete(result) {
-        state.plan = result.plan;
+        state.plan = result.plan || [];
+        state.planCharacters = JSON.parse(JSON.stringify(result.characters || []));
+        activeDraftTab = state.plan.length ? state.plan[0].chapter : null;
+        state.characters = state.characters || [];
         if (result.characters?.length) {
           result.characters.forEach(char => {
             if (!state.characters.find(c => c.id === char.id)) state.characters.push(char);
@@ -1497,6 +1585,19 @@ pre.prompt-preview {
         scheduleAutosave();
       }
     });
+  }
+
+  function restoreCharactersFromPlan() {
+    const source = state.planCharacters || [];
+    if (!source.length) {
+      showToast('No characters available from the story plan. Generate the outline first.');
+      return;
+    }
+    state.characters = source.map(char => JSON.parse(JSON.stringify(char)));
+    scheduleAutosave();
+    refreshDraftPromptPreviews();
+    showToast('Character list restored from the story plan.');
+    render();
   }
 
   async function generateCover(model) {
@@ -1784,6 +1885,23 @@ pre.prompt-preview {
     },
     function planStep(container) {
       const panel = createSection('Story Arc & Chapter Plan');
+      const promptDescription = document.createElement('p');
+      promptDescription.className = 'small';
+      promptDescription.textContent = 'Adjust the agent prompt before generating a new outline. Changes are saved with your project.';
+      panel.appendChild(promptDescription);
+      const promptArea = createTextarea(state.prompts?.plan?.system || defaultPrompts.plan.system, {
+        spellcheck: false,
+        placeholder: 'Edit the Story Arc & Chapter Plan agent prompt here...'
+      });
+      promptArea.style.fontFamily = 'JetBrains Mono, Fira Code, monospace';
+      promptArea.style.minHeight = '140px';
+      promptArea.addEventListener('input', () => {
+        state.prompts = state.prompts || {};
+        state.prompts.plan = state.prompts.plan || {};
+        state.prompts.plan.system = promptArea.value;
+        scheduleAutosave();
+      });
+      panel.appendChild(labelWrap('Story Arc & Chapter Plan agent prompt', promptArea));
       const planList = document.createElement('div');
       planList.className = 'grid two';
       (state.plan || []).forEach(plan => {
@@ -1803,10 +1921,21 @@ pre.prompt-preview {
       const list = document.createElement('div');
       populateCharacterList(list);
       panel.appendChild(list);
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      const regenBtn = document.createElement('button');
+      regenBtn.className = 'secondary';
+      regenBtn.textContent = 'Restore from Story Plan';
+      if (!state.planCharacters?.length) {
+        regenBtn.disabled = true;
+        regenBtn.title = 'Generate the story outline first to populate characters.';
+      }
+      regenBtn.onclick = () => restoreCharactersFromPlan();
       const genBtn = document.createElement('button');
       genBtn.textContent = 'Generate Character Notes';
       genBtn.onclick = generateCharacters;
-      panel.appendChild(genBtn);
+      actions.append(regenBtn, genBtn);
+      panel.appendChild(actions);
       if (state.charactersNotes) {
         const notes = document.createElement('pre');
         notes.className = 'prompt-preview';
